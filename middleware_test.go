@@ -26,12 +26,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/go-oidc/jose"
 	uuid "github.com/gofrs/uuid"
+	"github.com/oleiade/reflections"
 	"github.com/rs/cors"
+	strcase "github.com/stoewer/go-strcase"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
-	"gopkg.in/resty.v1"
+	resty "gopkg.in/resty.v1"
+	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 const (
@@ -39,39 +41,39 @@ const (
 )
 
 type fakeRequest struct {
-	BasicAuth               bool
-	Cookies                 []*http.Cookie
-	Expires                 time.Duration
-	FormValues              map[string]string
-	Groups                  []string
-	HasCookieToken          bool
-	HasLogin                bool
-	HasToken                bool
-	Headers                 map[string]string
-	Method                  string
-	NotSigned               bool
-	OnResponse              func(int, *resty.Request, *resty.Response)
-	Password                string
-	ProxyProtocol           string
-	ProxyRequest            bool
-	RawToken                string
-	Redirects               bool
-	Roles                   []string
-	TokenClaims             jose.Claims
-	URI                     string
-	URL                     string
-	Username                string
-	ExpectedCode            int
-	ExpectedContent         string
-	ExpectedContentContains string
-	ExpectedCookies         map[string]string
-	ExpectedHeaders         map[string]string
-	ExpectedLocation        string
-	ExpectedNoProxyHeaders  []string
-	ExpectedProxy           bool
-	ExpectedProxyHeaders    map[string]string
-
-	// advanced test cases
+	BasicAuth                bool
+	Cookies                  []*http.Cookie
+	Expires                  time.Duration
+	FormValues               map[string]string
+	Groups                   []string
+	HasCookieToken           bool
+	HasLogin                 bool
+	HasToken                 bool
+	Headers                  map[string]string
+	Method                   string
+	NotSigned                bool
+	OnResponse               func(int, *resty.Request, *resty.Response)
+	Password                 string
+	ProxyProtocol            string
+	ProxyRequest             bool
+	RawToken                 string
+	Redirects                bool
+	Roles                    []string
+	SkipClientIDCheck        bool
+	SkipIssuerCheck          bool
+	TokenClaims              map[string]interface{}
+	URI                      string
+	URL                      string
+	Username                 string
+	ExpectedCode             int
+	ExpectedContent          string
+	ExpectedContentContains  string
+	ExpectedCookies          map[string]string
+	ExpectedHeaders          map[string]string
+	ExpectedLocation         string
+	ExpectedNoProxyHeaders   []string
+	ExpectedProxy            bool
+	ExpectedProxyHeaders     map[string]string
 	ExpectedCookiesValidator map[string]func(string) bool
 }
 
@@ -102,7 +104,7 @@ func newFakeProxy(c *Config) *fakeProxy {
 	}
 	c.RedirectionURL = fmt.Sprintf("http://%s", proxy.listener.Addr().String())
 	// step: we need to update the client configs
-	if proxy.client, proxy.idp, proxy.idpClient, err = proxy.newOpenIDClient(); err != nil {
+	if proxy.provider, proxy.idpClient, err = proxy.newOpenIDProvider(); err != nil {
 		panic("failed to recreate the openid client, error: " + err.Error())
 	}
 
@@ -125,6 +127,8 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 		var upstream fakeUpstreamResponse
 
 		f.config.NoRedirects = !c.Redirects
+		f.config.SkipAccessTokenClientIDCheck = c.SkipClientIDCheck
+		f.config.SkipAccessTokenIssuerCheck = c.SkipIssuerCheck
 		// we need to set any defaults
 		if c.Method == "" {
 			c.Method = http.MethodGet
@@ -184,7 +188,10 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 		if c.HasToken {
 			token := newTestToken(f.idp.getLocation())
 			if c.TokenClaims != nil && len(c.TokenClaims) > 0 {
-				token.merge(c.TokenClaims)
+				for i := range c.TokenClaims {
+					err := reflections.SetField(&token.claims, strcase.UpperCamelCase(i), c.TokenClaims[i])
+					assert.NoError(t, err)
+				}
 			}
 			if len(c.Roles) > 0 {
 				token.addRealmRoles(c.Roles)
@@ -196,11 +203,13 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 				token.setExpiration(time.Now().Add(c.Expires))
 			}
 			if c.NotSigned {
-				authToken := token.getToken()
-				setRequestAuthentication(f.config, client, request, &c, authToken.Encode())
+				authToken, err := token.getUnsignedToken()
+				assert.NoError(t, err)
+				setRequestAuthentication(f.config, client, request, &c, authToken)
 			} else {
-				signed, _ := f.idp.signToken(token.claims)
-				setRequestAuthentication(f.config, client, request, &c, signed.Encode())
+				authToken, err := token.getToken()
+				assert.NoError(t, err)
+				setRequestAuthentication(f.config, client, request, &c, authToken)
 			}
 		}
 
@@ -995,7 +1004,7 @@ func TestRolePermissionsMiddleware(t *testing.T) {
 			HasToken:     true,
 			NotSigned:    true,
 			Roles:        []string{fakeTestRole},
-			ExpectedCode: http.StatusForbidden,
+			ExpectedCode: http.StatusUnauthorized,
 		},
 		{ // check with correct token, signed
 			URI:          "/admin/page",
@@ -1247,15 +1256,18 @@ func testEncryptedToken(t *testing.T, cfg *Config) {
 		if err != nil {
 			return false
 		}
-		jwt, err := jose.ParseJWT(accessToken)
+		token, err := jwt.ParseSigned(accessToken)
+
 		if err != nil {
 			return false
 		}
-		claims, err := jwt.Claims()
+
+		user, err := extractIdentity(token)
+
 		if err != nil {
 			return false
 		}
-		return assert.Contains(t, claims, "aud") && assert.Contains(t, claims, "email")
+		return assert.Contains(t, user.claims, "aud") && assert.Contains(t, user.claims, "email")
 	}
 	p := newFakeProxy(cfg)
 	p.idp.setTokenExpiration(1000 * time.Millisecond)
@@ -1291,7 +1303,7 @@ func TestCustomHeadersHandler(t *testing.T) {
 			Request: fakeRequest{
 				URI:      fakeAuthAllURL,
 				HasToken: true,
-				TokenClaims: jose.Claims{
+				TokenClaims: map[string]interface{}{
 					"sub":                "test-subject",
 					"username":           "rohith",
 					"preferred_username": "rohith",
@@ -1312,7 +1324,7 @@ func TestCustomHeadersHandler(t *testing.T) {
 			Request: fakeRequest{
 				URI:      fakeAuthAllURL,
 				HasToken: true,
-				TokenClaims: jose.Claims{
+				TokenClaims: map[string]interface{}{
 					"email":              "gambol99@gmail.com",
 					"name":               "Rohith Jayawardene",
 					"family_name":        "Jayawardene",
@@ -1466,7 +1478,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 	}{
 		// jose.StringClaim test
 		{
-			Matches: map[string]string{"cal": "test"},
+			Matches: map[string]string{"item": "test"},
 			Request: fakeRequest{
 				URI:          testAdminURI,
 				HasToken:     true,
@@ -1486,7 +1498,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:           testAdminURI,
 				HasToken:      true,
-				TokenClaims:   jose.Claims{"item": "tes"},
+				TokenClaims:   map[string]interface{}{"item": "tes"},
 				ExpectedProxy: true,
 				ExpectedCode:  http.StatusOK,
 			},
@@ -1496,7 +1508,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:          testAdminURI,
 				HasToken:     true,
-				TokenClaims:  jose.Claims{"item": "test"},
+				TokenClaims:  map[string]interface{}{"item": "test"},
 				ExpectedCode: http.StatusForbidden,
 			},
 		},
@@ -1505,7 +1517,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:          testAdminURI,
 				HasToken:     true,
-				TokenClaims:  jose.Claims{"item": "test"},
+				TokenClaims:  map[string]interface{}{"item": "test"},
 				ExpectedCode: http.StatusForbidden,
 			},
 		},
@@ -1514,7 +1526,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:      testAdminURI,
 				HasToken: true,
-				TokenClaims: jose.Claims{
+				TokenClaims: map[string]interface{}{
 					"item":  "tester",
 					"found": "something",
 				},
@@ -1527,7 +1539,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:           testAdminURI,
 				HasToken:      true,
-				TokenClaims:   jose.Claims{"item": "test"},
+				TokenClaims:   map[string]interface{}{"item": "test"},
 				ExpectedProxy: true,
 				ExpectedCode:  http.StatusOK,
 			},
@@ -1537,28 +1549,28 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:           testAdminURI,
 				HasToken:      true,
-				TokenClaims:   jose.Claims{"item": "test"},
+				TokenClaims:   map[string]interface{}{"item": "test"},
 				ExpectedProxy: true,
 				ExpectedCode:  http.StatusOK,
 			},
 		},
 		// jose.StringsClaim test
 		{
-			Matches: map[string]string{"item": "^t.*t"},
+			Matches: map[string]string{"item1": "^t.*t"},
 			Request: fakeRequest{
 				URI:           testAdminURI,
 				HasToken:      true,
-				TokenClaims:   jose.Claims{"item": []string{"nonMatchingClaim", "test", "anotherNonMatching"}},
+				TokenClaims:   map[string]interface{}{"item1": []string{"nonMatchingClaim", "test", "anotherNonMatching"}},
 				ExpectedProxy: true,
 				ExpectedCode:  http.StatusOK,
 			},
 		},
 		{
-			Matches: map[string]string{"item": "^t.*t"},
+			Matches: map[string]string{"item1": "^t.*t"},
 			Request: fakeRequest{
 				URI:           testAdminURI,
 				HasToken:      true,
-				TokenClaims:   jose.Claims{"item": []string{"1test", "2test", "3test"}},
+				TokenClaims:   map[string]interface{}{"item1": []string{"1test", "2test", "3test"}},
 				ExpectedProxy: false,
 				ExpectedCode:  http.StatusForbidden,
 			},
@@ -1568,7 +1580,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:           testAdminURI,
 				HasToken:      true,
-				TokenClaims:   jose.Claims{"item": []string{}},
+				TokenClaims:   map[string]interface{}{"item1": []string{}},
 				ExpectedProxy: false,
 				ExpectedCode:  http.StatusForbidden,
 			},
@@ -1581,7 +1593,7 @@ func TestRolesAdmissionHandlerClaims(t *testing.T) {
 			Request: fakeRequest{
 				URI:      testAdminURI,
 				HasToken: true,
-				TokenClaims: jose.Claims{
+				TokenClaims: map[string]interface{}{
 					"item1": []string{"randomItem", "test"},
 					"item2": []string{"randomItem", "anotherItem"},
 					"item3": []string{"randomItem2", "anotherItem3"},

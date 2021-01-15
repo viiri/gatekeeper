@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/coreos/go-oidc/jose"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -57,12 +56,7 @@ const (
 	tokenURL         = "/token"
 	debugURL         = "/debug/pprof"
 
-	claimAudience       = "aud"
-	claimPreferredName  = "preferred_username"
-	claimRealmAccess    = "realm_access"
-	claimResourceAccess = "resource_access"
-	claimResourceRoles  = "roles"
-	claimGroups         = "groups"
+	claimResourceRoles = "roles"
 
 	accessCookie       = "kc-access"
 	refreshCookie      = "kc-state"
@@ -126,12 +120,8 @@ var (
 	ErrNoSessionStateFound = errors.New("no session state found")
 	// ErrInvalidSession the session is invalid
 	ErrInvalidSession = errors.New("invalid session identifier")
-	// ErrAccessTokenExpired indicates the access token has expired
-	ErrAccessTokenExpired = errors.New("the access token has expired")
 	// ErrRefreshTokenExpired indicates the refresh token as expired
 	ErrRefreshTokenExpired = errors.New("the refresh token has expired")
-	// ErrNoTokenAudience indicates their is not audience in the token
-	ErrNoTokenAudience = errors.New("the token does not audience in claims")
 	// ErrDecryption indicates we can't decrypt the token
 	ErrDecryption = errors.New("failed to decrypt token")
 )
@@ -312,6 +302,10 @@ type Config struct {
 	NoRedirects bool `json:"no-redirects" yaml:"no-redirects" usage:"do not have back redirects when no authentication is present, 401 them"`
 	// SkipTokenVerification tells the service to skipp verifying the access token - for testing purposes
 	SkipTokenVerification bool `json:"skip-token-verification" yaml:"skip-token-verification" usage:"TESTING ONLY; bypass token verification, only expiration and roles enforced"`
+	// according RFC issuer should not be checked on access token, this will be default true in future
+	SkipAccessTokenIssuerCheck bool `json:"skip-access-token-issuer-check" yaml:"skip-access-token-issuer-check" usage:"according RFC issuer should not be checked on access token, this will be default true in future"`
+	// according RFC client id should not be checked on access token, this will be default true in future
+	SkipAccessTokenClientIDCheck bool `json:"skip-access-token-clientid-check" yaml:"skip-access-token-clientid-check" usage:"according RFC client id should not be checked on access token, this will be default true in future"`
 	// UpstreamKeepalives specifies whether we use keepalives on the upstream
 	UpstreamKeepalives bool `json:"upstream-keepalives" yaml:"upstream-keepalives" usage:"enables or disables the keepalive connections for upstream endpoint"`
 	// UpstreamTimeout is the maximum amount of time a dial will wait for a connect to complete
@@ -418,8 +412,6 @@ type userContext struct {
 	audiences []string
 	// whether the context is from a session cookie or authorization header
 	bearerToken bool
-	// the claims associated to the token
-	claims jose.Claims
 	// the email associated to the user
 	email string
 	// the expiration of the access token
@@ -432,8 +424,10 @@ type userContext struct {
 	preferredName string
 	// roles is a collection of roles the users holds
 	roles []string
-	// the access token itself
-	token jose.JWT
+	// rawToken
+	rawToken string
+	// claims
+	claims map[string]interface{}
 }
 
 // tokenResponse

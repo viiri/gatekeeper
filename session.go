@@ -21,8 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/coreos/go-oidc/jose"
 	"go.uber.org/zap"
+	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 // getIdentity retrieves the user identity from a request, either from a session cookie or a bearer token
@@ -38,15 +38,20 @@ func (r *oauthProxy) getIdentity(req *http.Request) (*userContext, error) {
 			return nil, ErrDecryption
 		}
 	}
-	token, err := jose.ParseJWT(access)
+
+	rawToken := access
+	token, err := jwt.ParseSigned(access)
+
 	if err != nil {
 		return nil, err
 	}
+
 	user, err := extractIdentity(token)
 	if err != nil {
 		return nil, err
 	}
 	user.bearerToken = isBearer
+	user.rawToken = rawToken
 
 	r.log.Debug("found the user identity",
 		zap.String("id", user.id),

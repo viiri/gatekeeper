@@ -32,11 +32,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/go-oidc/oidc"
-	"golang.org/x/oauth2"
-
+	oidc3 "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-chi/chi"
 	"go.uber.org/zap"
+	"golang.org/x/oauth2"
+	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 // getRedirectionURL returns the redirectionURL for the oauth flow
@@ -74,7 +74,6 @@ func (r *oauthProxy) oauthAuthorizationHandler(w http.ResponseWriter, req *http.
 		return
 	}
 	conf := r.newOAuth2Config(r.getRedirectionURL(w, req))
-
 	// step: set the access type of the session
 	accessType := oauth2.AccessTypeOnline
 	if containedIn("offline", r.config.Scopes) {
@@ -114,7 +113,6 @@ func (r *oauthProxy) oauthCallbackHandler(w http.ResponseWriter, req *http.Reque
 	}
 
 	conf := r.newOAuth2Config(r.getRedirectionURL(w, req))
-
 	resp, err := exchangeAuthenticationCode(conf, code)
 	if err != nil {
 		r.log.Error("unable to exchange code for access token", zap.Error(err))
@@ -122,6 +120,7 @@ func (r *oauthProxy) oauthCallbackHandler(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
+	rawToken := ""
 	// Flow: once we exchange the authorization code we parse the ID Token; we then check for an access token,
 	// if an access token is present and we can decode it, we use that as the session token, otherwise we default
 	// to the ID Token.
@@ -132,28 +131,78 @@ func (r *oauthProxy) oauthCallbackHandler(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
-	token, identity, err := parseToken(rawIDToken)
+	rawToken = rawIDToken
+
+	verifier := r.provider.Verifier(&oidc3.Config{ClientID: r.config.ClientID})
+
+	var idToken *oidc3.IDToken
+
+	ctx, cancel := context.WithTimeout(context.Background(), r.config.OpenIDProviderTimeout)
+	defer cancel()
+
+	idToken, err = verifier.Verify(ctx, rawIDToken)
+
 	if err != nil {
-		r.log.Error("unable to parse id token for identity", zap.Error(err))
-		r.accessForbidden(w, req)
-		return
-	}
-
-	access, id, err := parseToken(resp.AccessToken)
-	if err == nil {
-		token = access
-		identity = id
-	} else {
-		r.log.Warn("unable to parse the access token, using id token only", zap.Error(err))
-	}
-
-	// step: check the access token is valid
-	if err = verifyToken(r.client, token); err != nil {
 		r.log.Error("unable to verify the id token", zap.Error(err))
 		r.accessForbidden(w, req)
 		return
 	}
-	accessToken := token.Encode()
+
+	token, err := jwt.ParseSigned(rawIDToken)
+
+	if err != nil {
+		r.log.Error("unable to parse id token", zap.Error(err))
+		r.accessForbidden(w, req)
+		return
+	}
+
+	stdClaims := &jwt.Claims{}
+	// Extract custom claims
+	var customClaims struct {
+		Email string `json:"email"`
+	}
+
+	err = token.UnsafeClaimsWithoutVerification(stdClaims, &customClaims)
+
+	if err != nil {
+		r.log.Error("unable to parse id token for claims", zap.Error(err))
+		r.accessForbidden(w, req)
+		return
+	}
+
+	// check https://openid.net/specs/openid-connect-core-1_0.html#ImplicitIDToken - at_hash
+	// keycloak seems doesnt support yet at_hash
+	// https://stackoverflow.com/questions/60818373/configure-keycloak-to-include-an-at-hash-claim-in-the-id-token
+	if idToken.AccessTokenHash != "" {
+		err = idToken.VerifyAccessToken(resp.AccessToken)
+
+		if err != nil {
+			r.log.Error("unable to verify access token", zap.Error(err))
+			r.accessForbidden(w, req)
+			return
+		}
+	}
+
+	accToken, err := jwt.ParseSigned(resp.AccessToken)
+
+	if err == nil {
+		token = accToken
+		rawToken = resp.AccessToken
+	} else {
+		r.log.Warn("unable to parse the access token, using id token only", zap.Error(err))
+	}
+
+	stdClaims = &jwt.Claims{}
+
+	err = token.UnsafeClaimsWithoutVerification(stdClaims, &customClaims)
+
+	if err != nil {
+		r.log.Error("unable to parse access token for claims", zap.Error(err))
+		r.accessForbidden(w, req)
+		return
+	}
+
+	accessToken := rawToken
 
 	// step: are we encrypting the access token?
 	if r.config.EnableEncryptedToken || r.config.ForceEncryptedCookie {
@@ -165,9 +214,9 @@ func (r *oauthProxy) oauthCallbackHandler(w http.ResponseWriter, req *http.Reque
 	}
 
 	r.log.Info("issuing access token for user",
-		zap.String("email", identity.Email),
-		zap.String("expires", identity.ExpiresAt.Format(time.RFC3339)),
-		zap.String("duration", time.Until(identity.ExpiresAt).String()))
+		zap.String("email", customClaims.Email),
+		zap.String("expires", stdClaims.Expiry.Time().Format(time.RFC3339)),
+		zap.String("duration", time.Until(stdClaims.Expiry.Time()).String()))
 
 	// @metric a token has been issued
 	oauthTokensMetric.WithLabelValues("issued").Inc()
@@ -187,24 +236,35 @@ func (r *oauthProxy) oauthCallbackHandler(w http.ResponseWriter, req *http.Reque
 		var expiration time.Duration
 		// notes: not all idp refresh tokens are readable, google for example, so we attempt to decode into
 		// a jwt and if possible extract the expiration, else we default to 10 days
-		var ident *oidc.Identity
 
-		if _, ident, err = parseToken(resp.RefreshToken); err != nil {
+		refreshToken, err := jwt.ParseSigned(resp.RefreshToken)
+
+		if err != nil {
+			r.log.Error("failed to parse refresh token", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		stdRefreshClaims := &jwt.Claims{}
+
+		err = refreshToken.UnsafeClaimsWithoutVerification(stdRefreshClaims)
+
+		if err != nil {
 			expiration = 0
 		} else {
-			expiration = time.Until(ident.ExpiresAt)
+			expiration = time.Until(stdRefreshClaims.Expiry.Time())
 		}
 
 		switch r.useStore() {
 		case true:
-			if err = r.StoreRefreshToken(token, encrypted, expiration); err != nil {
+			if err = r.StoreRefreshToken(accessToken, encrypted, expiration); err != nil {
 				r.log.Warn("failed to save the refresh token in the store", zap.Error(err))
 			}
 		default:
 			r.dropRefreshTokenCookie(req, w, encrypted, expiration)
 		}
 	} else {
-		r.dropAccessTokenCookie(req, w, accessToken, time.Until(identity.ExpiresAt))
+		r.dropAccessTokenCookie(req, w, accessToken, time.Until(stdClaims.Expiry.Time()))
 	}
 
 	// step: decode the request variable
@@ -247,12 +307,19 @@ func (r *oauthProxy) loginHandler(w http.ResponseWriter, req *http.Request) {
 		// @metric observe the time taken for a login request
 		oauthLatencyMetric.WithLabelValues("login").Observe(time.Since(start).Seconds())
 
-		_, identity, err := parseToken(token.AccessToken)
+		webToken, err := jwt.ParseSigned(token.AccessToken)
+
 		if err != nil {
 			return "unable to decode the access token", http.StatusNotImplemented, err
 		}
 
-		r.dropAccessTokenCookie(req, w, token.AccessToken, time.Until(identity.ExpiresAt))
+		identity, err := extractIdentity(webToken)
+
+		if err != nil {
+			return "unable to extract identity from access token", http.StatusNotImplemented, err
+		}
+
+		r.dropAccessTokenCookie(req, w, token.AccessToken, time.Until(identity.expiresAt))
 
 		// @metric a token has been issued
 		oauthTokensMetric.WithLabelValues("login").Inc()
@@ -316,7 +383,7 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// step: can either use the id token or the refresh token
-	identityToken := user.token.Encode()
+	identityToken := user.rawToken
 	//nolint:vetshadow
 	if refresh, _, err := r.retrieveRefreshToken(req, user); err == nil {
 		identityToken = refresh
@@ -329,17 +396,14 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 	// step: check if the user has a state session and if so revoke it
 	if r.useStore() {
 		go func() {
-			if err = r.DeleteRefreshToken(user.token); err != nil {
+			if err = r.DeleteRefreshToken(user.rawToken); err != nil {
 				r.log.Error("unable to remove the refresh token from store", zap.Error(err))
 			}
 		}()
 	}
 
 	// set the default revocation url
-	revokeDefault := ""
-	if r.idp.EndSessionEndpoint != nil {
-		revokeDefault = r.idp.EndSessionEndpoint.String()
-	}
+	revokeDefault := fmt.Sprintf("%s/protocol/openid-connect/logout", strings.TrimSuffix(r.config.DiscoveryURL, "/.well-known/openid-configuration"))
 	revocationURL := defaultTo(r.config.RevocationEndpoint, revokeDefault)
 
 	// @check if we should redirect to the provider
@@ -434,7 +498,7 @@ func (r *oauthProxy) tokenHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(user.token.Payload)
+	_, _ = w.Write([]byte(user.rawToken))
 }
 
 // healthHandler is a health check handler for the service
@@ -495,7 +559,7 @@ func (r *oauthProxy) proxyMetricsHandler(w http.ResponseWriter, req *http.Reques
 func (r *oauthProxy) retrieveRefreshToken(req *http.Request, user *userContext) (token, encrypted string, err error) {
 	switch r.useStore() {
 	case true:
-		token, err = r.GetRefreshToken(user.token)
+		token, err = r.GetRefreshToken(user.rawToken)
 	default:
 		token, err = r.getRefreshTokenFromCookie(req)
 	}
