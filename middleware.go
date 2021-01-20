@@ -317,14 +317,14 @@ func (r *oauthProxy) authenticationMiddleware() func(http.Handler) http.Handler 
 									r.log.Error("failed to store refresh token", zap.Error(err))
 									return
 								}
-							}(user.rawToken, accessToken, encryptedRefreshToken)
+							}(user.rawToken, newRawAccToken, encryptedRefreshToken)
 						} else {
 							r.dropRefreshTokenCookie(req.WithContext(ctx), w, encryptedRefreshToken, refreshExpiresIn)
 						}
 					}
 
 					// update the with the new access token and inject into the context
-					user.rawToken = accessToken
+					user.rawToken = newRawAccToken
 					ctx = context.WithValue(req.Context(), contextScopeName, scope)
 				}
 			}
