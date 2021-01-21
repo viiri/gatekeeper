@@ -639,3 +639,7 @@ is due to the fact the *client\_id* is not in the audience anymore. The
 workaround is to add the "Audience" protocol mapper to the client with
 the audience pointed to the *client\_id*. For more information, see
 [KEYCLOAK-8954](https://issues.redhat.com/browse/KEYCLOAK-8954).
+
+you can now use `--skip-access-token-clientid-check` and
+`--skip-access-token-issuer-check` to overcome this limitations, in future they
+will be true by default
