@@ -216,13 +216,16 @@ in Keycloak, providing granular role controls over issue tokens.
 
 ``` yaml
 - name: gatekeeper
-  image: quay.io/gogatekeeper/gatekeeper:1.1.0
+  image: quay.io/gogatekeeper/gatekeeper:1.2.0
   args:
   - --enable-forwarding=true
   - --forwarding-username=projecta
   - --forwarding-password=some_password
   - --forwarding-domains=projecta.svc.cluster.local
   - --forwarding-domains=projectb.svc.cluster.local
+  - --client-id=xxxxxx
+  - --client-secret=xxxx
+  - --discovery-url=http://keycloak:8080/auth/realms/master
   - --tls-ca-certificate=/etc/secrets/ca.pem
   - --tls-ca-key=/etc/secrets/ca-key.pem
   # Note: if you don't specify any forwarding domains, all domains will be signed; Also the code checks is the
