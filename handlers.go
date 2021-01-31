@@ -322,6 +322,8 @@ func (r *oauthProxy) loginHandler(w http.ResponseWriter, req *http.Request) {
 		// @metric observe the time taken for a login request
 		oauthLatencyMetric.WithLabelValues("login").Observe(time.Since(start).Seconds())
 
+		accessToken := token.AccessToken
+		refreshToken := token.RefreshToken
 		webToken, err := jwt.ParseSigned(token.AccessToken)
 
 		if err != nil {
@@ -334,33 +336,115 @@ func (r *oauthProxy) loginHandler(w http.ResponseWriter, req *http.Request) {
 			return "unable to extract identity from access token", http.StatusNotImplemented, err
 		}
 
-		r.dropAccessTokenCookie(req, w, token.AccessToken, time.Until(identity.expiresAt))
+		w.Header().Set("Content-Type", "application/json")
+		idToken, ok := token.Extra("id_token").(string)
+
+		if !ok {
+			return "", http.StatusInternalServerError, fmt.Errorf("token response does not contain an id_token")
+		}
+
+		expiresIn, ok := token.Extra("expires_in").(float64)
+
+		if !ok {
+			return "", http.StatusInternalServerError, fmt.Errorf("token response does not contain expires_in")
+		}
+
+		// step: are we encrypting the access token?
+		if r.config.EnableEncryptedToken || r.config.ForceEncryptedCookie {
+			if accessToken, err = encodeText(accessToken, r.config.EncryptionKey); err != nil {
+				r.log.Error("unable to encode the access token", zap.Error(err))
+				return "unable to encode the access token", http.StatusInternalServerError, err
+			}
+			if refreshToken, err = encodeText(refreshToken, r.config.EncryptionKey); err != nil {
+				r.log.Error("unable to encode the refresh token", zap.Error(err))
+				return "unable to encode the refresh token", http.StatusInternalServerError, err
+			}
+			if idToken, err = encodeText(idToken, r.config.EncryptionKey); err != nil {
+				r.log.Error("unable to encode the idToken token", zap.Error(err))
+				return "unable to encode the idToken token", http.StatusInternalServerError, err
+			}
+		}
+
+		// step: does the response have a refresh token and we do NOT ignore refresh tokens?
+		if r.config.EnableRefreshTokens && token.RefreshToken != "" {
+			var encrypted string
+			encrypted, err = encodeText(token.RefreshToken, r.config.EncryptionKey)
+
+			if err != nil {
+				r.log.Error("failed to encrypt the refresh token", zap.Error(err))
+				return "failed to encrypt the refresh token", http.StatusInternalServerError, err
+			}
+
+			// drop in the access token - cookie expiration = access token
+			r.dropAccessTokenCookie(req, w, accessToken, r.getAccessCookieExpiration(token.RefreshToken))
+
+			var expiration time.Duration
+			// notes: not all idp refresh tokens are readable, google for example, so we attempt to decode into
+			// a jwt and if possible extract the expiration, else we default to 10 days
+
+			refreshToken, errRef := jwt.ParseSigned(token.RefreshToken)
+
+			if errRef != nil {
+				r.log.Error("failed to parse refresh token", zap.Error(errRef))
+				return "failed to parse refresh token", http.StatusInternalServerError, errRef
+			}
+
+			stdRefreshClaims := &jwt.Claims{}
+
+			err = refreshToken.UnsafeClaimsWithoutVerification(stdRefreshClaims)
+
+			if err != nil {
+				expiration = 0
+			} else {
+				expiration = time.Until(stdRefreshClaims.Expiry.Time())
+			}
+
+			switch r.useStore() {
+			case true:
+				if err = r.StoreRefreshToken(accessToken, encrypted, expiration); err != nil {
+					r.log.Warn("failed to save the refresh token in the store", zap.Error(err))
+				}
+			default:
+				r.dropRefreshTokenCookie(req, w, encrypted, expiration)
+			}
+		} else {
+			r.dropAccessTokenCookie(req, w, accessToken, time.Until(identity.expiresAt))
+		}
 
 		// @metric a token has been issued
 		oauthTokensMetric.WithLabelValues("login").Inc()
 
-		w.Header().Set("Content-Type", "application/json")
-		idToken, ok := token.Extra("id_token").(string)
-		if !ok {
-			return "", http.StatusInternalServerError, fmt.Errorf("token response does not contain an id_token")
-		}
-		expiresIn, ok := token.Extra("expires_in").(float64)
-		if !ok {
-			return "", http.StatusInternalServerError, fmt.Errorf("token response does not contain expires_in")
-		}
 		scope, _ := token.Extra("scope").(string)
-		if err := json.NewEncoder(w).Encode(tokenResponse{
-			IDToken:      idToken,
-			AccessToken:  token.AccessToken,
-			RefreshToken: token.RefreshToken,
-			ExpiresIn:    expiresIn,
-			Scope:        scope,
-		}); err != nil {
+
+		var resp tokenResponse
+
+		if r.config.EnableEncryptedToken {
+			resp = tokenResponse{
+				IDToken:      idToken,
+				AccessToken:  accessToken,
+				RefreshToken: refreshToken,
+				ExpiresIn:    expiresIn,
+				Scope:        scope,
+			}
+		} else {
+			resp = tokenResponse{
+				IDToken:      token.Extra("id_token").(string),
+				AccessToken:  token.AccessToken,
+				RefreshToken: token.RefreshToken,
+				ExpiresIn:    expiresIn,
+				Scope:        scope,
+			}
+		}
+
+		err = json.NewEncoder(w).Encode(resp)
+
+		if err != nil {
 			return "", http.StatusInternalServerError, err
 		}
 
 		return "", http.StatusOK, nil
 	}()
+
 	if err != nil {
 		r.log.Error(errorMsg,
 			zap.String("client_ip", req.RemoteAddr),

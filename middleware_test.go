@@ -66,7 +66,7 @@ type fakeRequest struct {
 	URL                      string
 	Username                 string
 	ExpectedCode             int
-	ExpectedContent          string
+	ExpectedContent          func(body string, testNum int)
 	ExpectedContentContains  string
 	ExpectedCookies          map[string]string
 	ExpectedHeaders          map[string]string
@@ -74,7 +74,7 @@ type fakeRequest struct {
 	ExpectedNoProxyHeaders   []string
 	ExpectedProxy            bool
 	ExpectedProxyHeaders     map[string]string
-	ExpectedCookiesValidator map[string]func(string) bool
+	ExpectedCookiesValidator map[string]func(*testing.T, *Config, string) bool
 }
 
 type fakeProxy struct {
@@ -270,9 +270,9 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 			}
 		}
 
-		if c.ExpectedContent != "" {
+		if c.ExpectedContent != nil {
 			e := string(resp.Body())
-			assert.Equal(t, c.ExpectedContent, e, "case %d, expected content: %s, got: %s", i, c.ExpectedContent, e)
+			c.ExpectedContent(e, i)
 		}
 		if c.ExpectedContentContains != "" {
 			e := string(resp.Body())
@@ -294,7 +294,7 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 					continue
 				}
 				if v != nil {
-					assert.True(t, v(cookie.Value), "case %d, invalid cookie value: %s", i, cookie.Value)
+					assert.True(t, v(t, f.config, cookie.Value), "case %d, invalid cookie value: %s", i, cookie.Value)
 				}
 			}
 		}
@@ -1244,31 +1244,47 @@ func TestCheckForcedEncryptedCookie(t *testing.T) {
 	testEncryptedToken(t, cfg)
 }
 
+func delay(no int, req *resty.Request, resp *resty.Response) {
+	if no == 0 {
+		<-time.After(1000 * time.Millisecond)
+	}
+}
+
+func checkAccessTokenEncryption(t *testing.T, cfg *Config, value string) bool {
+	rawToken, err := decodeText(value, cfg.EncryptionKey)
+
+	if err != nil {
+		return false
+	}
+
+	token, err := jwt.ParseSigned(rawToken)
+
+	if err != nil {
+		return false
+	}
+
+	user, err := extractIdentity(token)
+
+	if err != nil {
+		return false
+	}
+
+	return assert.Contains(t, user.claims, "aud") && assert.Contains(t, user.claims, "email")
+}
+
+func checkRefreshTokenEncryption(t *testing.T, cfg *Config, value string) bool {
+	rawToken, err := decodeText(value, cfg.EncryptionKey)
+
+	if err != nil {
+		return false
+	}
+
+	_, err = jwt.ParseSigned(rawToken)
+
+	return err == nil
+}
+
 func testEncryptedToken(t *testing.T, cfg *Config) {
-	fn := func(no int, req *resty.Request, resp *resty.Response) {
-		if no == 0 {
-			<-time.After(1000 * time.Millisecond)
-		}
-	}
-	val := func(value string) bool {
-		// check the cookie value is an encrypted token
-		accessToken, err := decodeText(value, cfg.EncryptionKey)
-		if err != nil {
-			return false
-		}
-		token, err := jwt.ParseSigned(accessToken)
-
-		if err != nil {
-			return false
-		}
-
-		user, err := extractIdentity(token)
-
-		if err != nil {
-			return false
-		}
-		return assert.Contains(t, user.claims, "aud") && assert.Contains(t, user.claims, "email")
-	}
 	p := newFakeProxy(cfg, &fakeAuthConfig{})
 	p.idp.setTokenExpiration(1000 * time.Millisecond)
 
@@ -1277,7 +1293,7 @@ func testEncryptedToken(t *testing.T, cfg *Config) {
 			URI:           fakeAuthAllURL,
 			HasLogin:      true,
 			Redirects:     true,
-			OnResponse:    fn,
+			OnResponse:    delay,
 			ExpectedProxy: true,
 			ExpectedCode:  http.StatusOK,
 		},
@@ -1287,7 +1303,7 @@ func testEncryptedToken(t *testing.T, cfg *Config) {
 			ExpectedProxy:            true,
 			ExpectedCode:             http.StatusOK,
 			ExpectedCookies:          map[string]string{cfg.CookieAccessName: ""},
-			ExpectedCookiesValidator: map[string]func(string) bool{cfg.CookieAccessName: val},
+			ExpectedCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
 		},
 	}
 	p.RunTests(t, requests)
