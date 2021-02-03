@@ -16,6 +16,8 @@ limitations under the License.
 package main
 
 import (
+	"crypto/tls"
+	"net/http"
 	"strings"
 	"time"
 
@@ -56,8 +58,24 @@ func (r *oauthProxy) newOAuth2Config(redirectionURL string) *oauth2.Config {
 // NOTE: we may be able to extract the specific (non-standard) claim refresh_expires_in and refresh_expires
 // from response.RawBody.
 // When not available, keycloak provides us with the same (for now) expiry value for ID token.
-func getRefreshedToken(conf *oauth2.Config, t string) (jwt.JSONWebToken, string, string, time.Time, time.Duration, error) {
-	tkn, err := conf.TokenSource(context.Background(), &oauth2.Token{RefreshToken: t}).Token()
+func getRefreshedToken(conf *oauth2.Config, proxyConfig *Config, t string) (jwt.JSONWebToken, string, string, time.Time, time.Duration, error) {
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		proxyConfig.OpenIDProviderTimeout,
+	)
+
+	if proxyConfig.SkipOpenIDProviderTLSVerify {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		sslcli := &http.Client{Transport: tr}
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, sslcli)
+	}
+
+	defer cancel()
+
+	tkn, err := conf.TokenSource(ctx, &oauth2.Token{RefreshToken: t}).Token()
+
 	if err != nil {
 		if strings.Contains(err.Error(), "refresh token has expired") {
 			return jwt.JSONWebToken{}, "", "", time.Time{}, time.Duration(0), ErrRefreshTokenExpired
@@ -83,13 +101,24 @@ func getRefreshedToken(conf *oauth2.Config, t string) (jwt.JSONWebToken, string,
 }
 
 // exchangeAuthenticationCode exchanges the authentication code with the oauth server for a access token
-func exchangeAuthenticationCode(client *oauth2.Config, code string) (*oauth2.Token, error) {
-	return getToken(client, GrantTypeAuthCode, code)
+func exchangeAuthenticationCode(client *oauth2.Config, code string, skipOpenIDProviderTLSVerify bool) (*oauth2.Token, error) {
+	return getToken(client, GrantTypeAuthCode, code, skipOpenIDProviderTLSVerify)
 }
 
 // getToken retrieves a code from the provider, extracts and verified the token
-func getToken(config *oauth2.Config, grantType, code string) (*oauth2.Token, error) {
+func getToken(config *oauth2.Config, grantType, code string, skipOpenIDProviderTLSVerify bool) (*oauth2.Token, error) {
 	ctx := context.Background()
+
+	if skipOpenIDProviderTLSVerify {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		sslcli := &http.Client{Transport: tr}
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, sslcli)
+	} else {
+		ctx = context.Background()
+	}
+
 	start := time.Now()
 	token, err := config.Exchange(ctx, code)
 	if err != nil {
