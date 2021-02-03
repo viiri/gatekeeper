@@ -47,6 +47,26 @@ func TestDecodeKeyPairs(t *testing.T) {
 			Ok: true,
 		},
 		{
+			List: []string{"a=b==", "b=3"},
+			KeyPairs: map[string]string{
+				"a": "b==",
+				"b": "3",
+			},
+			Ok: true,
+		},
+		{
+			List: []string{"a=", "b=3"},
+			KeyPairs: map[string]string{
+				"a": "",
+				"b": "3",
+			},
+			Ok: true,
+		},
+		{
+			List: []string{"a=b", "==b==3=="},
+			Ok:   false,
+		},
+		{
 			List: []string{"add", "b=3"},
 		},
 	}
