@@ -151,6 +151,7 @@ func newFakeAuthServer(config *fakeAuthConfig) *fakeAuthServer {
 	r.Get("/auth/realms/hod-test/protocol/openid-connect/auth", service.authHandler)
 	r.Get("/auth/realms/hod-test/protocol/openid-connect/userinfo", service.userInfoHandler)
 	r.Post("/auth/realms/hod-test/protocol/openid-connect/logout", service.logoutHandler)
+	r.Post("/auth/realms/hod-test/protocol/openid-connect/revoke", service.revocationHandler)
 	r.Post("/auth/realms/hod-test/protocol/openid-connect/token", service.tokenHandler)
 
 	if config.EnableTLS {
@@ -178,7 +179,7 @@ func (r *fakeAuthServer) getLocation() string {
 }
 
 func (r *fakeAuthServer) getRevocationURL() string {
-	return fmt.Sprintf("%s://%s/auth/realms/hod-test/protocol/openid-connect/logout", r.location.Scheme, r.location.Host)
+	return fmt.Sprintf("%s://%s/auth/realms/hod-test/protocol/openid-connect/revoke", r.location.Scheme, r.location.Host)
 }
 
 func (r *fakeAuthServer) setTokenExpiration(tm time.Duration) *fakeAuthServer {
@@ -225,12 +226,19 @@ func (r *fakeAuthServer) authHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *fakeAuthServer) logoutHandler(w http.ResponseWriter, req *http.Request) {
-	if refreshToken := req.FormValue("refresh_token"); refreshToken == "" {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (r *fakeAuthServer) revocationHandler(w http.ResponseWriter, req *http.Request) {
+	// according RFC revocation endpoint can be access/refresh token, keycloak
+	// implementation https://github.com/keycloak/keycloak/pull/6704, accepts
+	// refresh/offline tokens
+	if token := req.FormValue("token"); token == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (r *fakeAuthServer) userInfoHandler(w http.ResponseWriter, req *http.Request) {

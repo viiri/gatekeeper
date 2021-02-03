@@ -399,6 +399,7 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 
 	// step: can either use the id token or the refresh token
 	identityToken := user.rawToken
+
 	//nolint:vetshadow
 	if refresh, _, err := r.retrieveRefreshToken(req, user); err == nil {
 		identityToken = refresh
@@ -416,10 +417,6 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 			}
 		}()
 	}
-
-	// set the default revocation url
-	revokeDefault := fmt.Sprintf("%s/protocol/openid-connect/logout", strings.TrimSuffix(r.config.DiscoveryURL, "/.well-known/openid-configuration"))
-	revocationURL := defaultTo(r.config.RevocationEndpoint, revokeDefault)
 
 	// @check if we should redirect to the provider
 	if r.config.EnableLogoutRedirect {
@@ -439,6 +436,16 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 
 		return
 	}
+
+	// set the default revocation url
+	revokeDefault := fmt.Sprintf(
+		"%s/protocol/openid-connect/revoke",
+		strings.TrimSuffix(
+			r.config.DiscoveryURL,
+			"/.well-known/openid-configuration",
+		),
+	)
+	revocationURL := defaultTo(r.config.RevocationEndpoint, revokeDefault)
 
 	// step: do we have a revocation endpoint?
 	if revocationURL != "" {
@@ -461,7 +468,14 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 		encodedSecret := url.QueryEscape(r.config.ClientSecret)
 
 		// step: construct the url for revocation
-		request, err := http.NewRequest(http.MethodPost, revocationURL, bytes.NewBufferString(fmt.Sprintf("refresh_token=%s", identityToken)))
+		request, err := http.NewRequest(
+			http.MethodPost,
+			revocationURL,
+			bytes.NewBufferString(
+				fmt.Sprintf("token=%s", identityToken),
+			),
+		)
+
 		if err != nil {
 			r.log.Error("unable to construct the revocation request", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
@@ -474,24 +488,33 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 
 		start := time.Now()
 		response, err := client.Do(request)
+
 		if err != nil {
 			r.log.Error("unable to post to revocation endpoint", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		defer response.Body.Close()
+
 		oauthLatencyMetric.WithLabelValues("revocation").Observe(time.Since(start).Seconds())
 
 		// step: check the response
 		switch response.StatusCode {
-		case http.StatusNoContent:
+		case http.StatusOK:
 			r.log.Info("successfully logged out of the endpoint", zap.String("email", user.email))
 		default:
 			content, _ := ioutil.ReadAll(response.Body)
-			r.log.Error("invalid response from revocation endpoint",
+			r.log.Error(
+				"invalid response from revocation endpoint",
 				zap.Int("status", response.StatusCode),
-				zap.String("response", fmt.Sprintf("%s", content)))
+				zap.String("response", fmt.Sprintf("%s", content)),
+			)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
-		defer response.Body.Close()
 	}
+
 	// step: should we redirect the user
 	if redirectURL != "" {
 		r.redirectToURL(redirectURL, w, req, http.StatusSeeOther)

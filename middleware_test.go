@@ -92,7 +92,6 @@ func newFakeProxy(c *Config, authConfig *fakeAuthConfig) *fakeProxy {
 
 	auth := newFakeAuthServer(authConfig)
 	c.DiscoveryURL = auth.getLocation()
-	c.RevocationEndpoint = auth.getRevocationURL()
 	c.Verbose = true
 	proxy, err := newProxy(c)
 	if err != nil {
