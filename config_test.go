@@ -35,44 +35,39 @@ func TestIsConfig(t *testing.T) {
 		},
 		{
 			Config: &Config{
-				DiscoveryURL:     "http://127.0.0.1:8080",
-				ClientAuthMethod: "secret-basic",
+				DiscoveryURL: "http://127.0.0.1:8080",
 			},
 		},
 		{
 			Config: &Config{
-				DiscoveryURL:     "http://127.0.0.1:8080",
-				ClientAuthMethod: "secret-basic",
-				ClientID:         "client",
-				ClientSecret:     "client",
+				DiscoveryURL: "http://127.0.0.1:8080",
+				ClientID:     "client",
+				ClientSecret: "client",
 			},
 		},
 		{
 			Config: &Config{
-				Listen:           ":8080",
-				DiscoveryURL:     "http://127.0.0.1:8080",
-				ClientAuthMethod: "secret-basic",
-				ClientID:         "client",
-				ClientSecret:     "client",
-				RedirectionURL:   "http://120.0.0.1",
+				Listen:         ":8080",
+				DiscoveryURL:   "http://127.0.0.1:8080",
+				ClientID:       "client",
+				ClientSecret:   "client",
+				RedirectionURL: "http://120.0.0.1",
 			},
 		},
 		{
 			Config: &Config{
-				Listen:           ":8080",
-				DiscoveryURL:     "http://127.0.0.1:8080",
-				ClientAuthMethod: "secret-basic",
-				ClientID:         "client",
-				ClientSecret:     "client",
-				RedirectionURL:   "http://120.0.0.1",
-				Upstream:         "http://120.0.0.1",
+				Listen:         ":8080",
+				DiscoveryURL:   "http://127.0.0.1:8080",
+				ClientID:       "client",
+				ClientSecret:   "client",
+				RedirectionURL: "http://120.0.0.1",
+				Upstream:       "http://120.0.0.1",
 			},
 		},
 		{
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -86,7 +81,6 @@ func TestIsConfig(t *testing.T) {
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -99,7 +93,6 @@ func TestIsConfig(t *testing.T) {
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -110,13 +103,12 @@ func TestIsConfig(t *testing.T) {
 		},
 		{
 			Config: &Config{
-				Listen:           ":8080",
-				DiscoveryURL:     "http://127.0.0.1:8080",
-				ClientAuthMethod: "secret-basic",
-				ClientID:         "client",
-				ClientSecret:     "client",
-				RedirectionURL:   "http://120.0.0.1",
-				Upstream:         "http://120.0.0.1",
+				Listen:         ":8080",
+				DiscoveryURL:   "http://127.0.0.1:8080",
+				ClientID:       "client",
+				ClientSecret:   "client",
+				RedirectionURL: "http://120.0.0.1",
+				Upstream:       "http://120.0.0.1",
 				MatchClaims: map[string]string{
 					"test": "&&&[",
 				},
@@ -137,7 +129,6 @@ func TestIsConfig(t *testing.T) {
 		{
 			Config: &Config{
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -150,7 +141,6 @@ func TestIsConfig(t *testing.T) {
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -162,7 +152,6 @@ func TestIsConfig(t *testing.T) {
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -175,7 +164,6 @@ func TestIsConfig(t *testing.T) {
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "http://120.0.0.1",
@@ -189,7 +177,6 @@ func TestIsConfig(t *testing.T) {
 			Config: &Config{
 				Listen:              ":8080",
 				DiscoveryURL:        "http://127.0.0.1:8080",
-				ClientAuthMethod:    "secret-basic",
 				ClientID:            "client",
 				ClientSecret:        "client",
 				RedirectionURL:      "https://120.0.0.1",

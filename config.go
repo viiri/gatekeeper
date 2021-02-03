@@ -35,7 +35,6 @@ func newDefaultConfig() *Config {
 
 	return &Config{
 		AccessTokenDuration:           time.Duration(720) * time.Hour,
-		ClientAuthMethod:              authMethodBasic,
 		CookieAccessName:              accessCookie,
 		CookieRefreshName:             refreshCookie,
 		EnableAuthorizationCookies:    true,
@@ -193,9 +192,6 @@ func (r *Config) isValid() error {
 				if _, err := url.Parse(r.StoreURL); err != nil {
 					return fmt.Errorf("the store url is invalid, error: %s", err)
 				}
-			}
-			if r.ClientAuthMethod != authMethodBasic && r.ClientAuthMethod != authMethodBody {
-				return fmt.Errorf("invalid client auth method %q (valid values: %s, %s)", r.ClientAuthMethod, authMethodBasic, authMethodBody)
 			}
 		}
 		// check: ensure each of the resource are valid
