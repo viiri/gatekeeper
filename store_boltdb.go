@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/etcd-io/bbolt"
+	"go.etcd.io/bbolt"
 )
 
 const (
