@@ -30,7 +30,7 @@ build: golang
 static: golang
 	@echo "--> Compiling the project statically"
 	@mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux go build -a -tags netgo -ldflags "-w ${LFLAGS}" -o bin/${NAME}
+	CGO_ENABLED=0 GOOS=linux go build -a -tags netgo -ldflags "-s -w ${LFLAGS}" -o bin/${NAME}
 
 .PHONY: container-build docker-build
 container-build: docker-build
