@@ -216,7 +216,7 @@ in Keycloak, providing granular role controls over issue tokens.
 
 ``` yaml
 - name: gatekeeper
-  image: quay.io/gogatekeeper/gatekeeper:1.2.0
+  image: quay.io/gogatekeeper/gatekeeper:1.2.1
   args:
   - --enable-forwarding=true
   - --forwarding-username=projecta
