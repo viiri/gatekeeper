@@ -41,40 +41,41 @@ const (
 )
 
 type fakeRequest struct {
-	BasicAuth                bool
-	Cookies                  []*http.Cookie
-	Expires                  time.Duration
-	FormValues               map[string]string
-	Groups                   []string
-	HasCookieToken           bool
-	HasLogin                 bool
-	HasToken                 bool
-	Headers                  map[string]string
-	Method                   string
-	NotSigned                bool
-	OnResponse               func(int, *resty.Request, *resty.Response)
-	Password                 string
-	ProxyProtocol            string
-	ProxyRequest             bool
-	RawToken                 string
-	Redirects                bool
-	Roles                    []string
-	SkipClientIDCheck        bool
-	SkipIssuerCheck          bool
-	TokenClaims              map[string]interface{}
-	URI                      string
-	URL                      string
-	Username                 string
-	ExpectedCode             int
-	ExpectedContent          func(body string, testNum int)
-	ExpectedContentContains  string
-	ExpectedCookies          map[string]string
-	ExpectedHeaders          map[string]string
-	ExpectedLocation         string
-	ExpectedNoProxyHeaders   []string
-	ExpectedProxy            bool
-	ExpectedProxyHeaders     map[string]string
-	ExpectedCookiesValidator map[string]func(*testing.T, *Config, string) bool
+	BasicAuth                     bool
+	Cookies                       []*http.Cookie
+	Expires                       time.Duration
+	FormValues                    map[string]string
+	Groups                        []string
+	HasCookieToken                bool
+	HasLogin                      bool
+	HasToken                      bool
+	Headers                       map[string]string
+	Method                        string
+	NotSigned                     bool
+	OnResponse                    func(int, *resty.Request, *resty.Response)
+	Password                      string
+	ProxyProtocol                 string
+	ProxyRequest                  bool
+	RawToken                      string
+	Redirects                     bool
+	Roles                         []string
+	SkipClientIDCheck             bool
+	SkipIssuerCheck               bool
+	TokenClaims                   map[string]interface{}
+	URI                           string
+	URL                           string
+	Username                      string
+	ExpectedCode                  int
+	ExpectedContent               func(body string, testNum int)
+	ExpectedContentContains       string
+	ExpectedCookies               map[string]string
+	ExpectedHeaders               map[string]string
+	ExpectedLocation              string
+	ExpectedNoProxyHeaders        []string
+	ExpectedProxy                 bool
+	ExpectedProxyHeaders          map[string]string
+	ExpectedCookiesValidator      map[string]func(*testing.T, *Config, string) bool
+	ExpectedLoginCookiesValidator map[string]func(*testing.T, *Config, string) bool
 }
 
 type fakeProxy struct {
@@ -116,6 +117,7 @@ func (f *fakeProxy) getServiceURL() string {
 }
 
 // RunTests performs a series of requests against a fake proxy service
+// nolint:funlen
 func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 	defer func() {
 		f.idp.Close()
@@ -288,13 +290,42 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 					assert.Equal(t, cookie.Value, v, "case %d, expected cookie value: %s, got: %s", i, v, cookie.Value)
 				}
 			}
+		}
+		if len(c.ExpectedCookiesValidator) > 0 {
 			for k, v := range c.ExpectedCookiesValidator {
 				cookie := findCookie(k, resp.Cookies())
+
 				if !assert.NotNil(t, cookie, "case %d, expected cookie %s not found", i, k) {
 					continue
 				}
+
 				if v != nil {
-					assert.True(t, v(t, f.config, cookie.Value), "case %d, invalid cookie value: %s", i, cookie.Value)
+					assert.True(
+						t,
+						v(t, f.config, cookie.Value),
+						"case %d, invalid cookie value: %s in expected cookie validator",
+						i,
+						cookie.Value,
+					)
+				}
+			}
+		}
+		if len(c.ExpectedLoginCookiesValidator) > 0 {
+			for k, v := range c.ExpectedLoginCookiesValidator {
+				cookie, ok := f.cookies[k]
+
+				if !assert.True(t, ok, "case %d, expected cookie %s not found", i, k) {
+					continue
+				}
+
+				if v != nil {
+					assert.True(
+						t,
+						v(t, f.config, cookie.Value),
+						"case %d, invalid cookie value in login cookie validator: %s",
+						i,
+						cookie.Value,
+					)
 				}
 			}
 		}
@@ -1191,39 +1222,35 @@ func TestCrossSiteHandler(t *testing.T) {
 	}
 }
 
-func TestCheckRefreshTokens(t *testing.T) {
+func TestRefreshTokenEncryption(t *testing.T) {
 	cfg := newFakeKeycloakConfig()
 	cfg.EnableRefreshTokens = true
 	cfg.EncryptionKey = testEncryptionKey
-	fn := func(no int, req *resty.Request, resp *resty.Response) {
-		if no == 0 {
-			<-time.After(1000 * time.Millisecond)
-		}
-	}
 	p := newFakeProxy(cfg, &fakeAuthConfig{})
 	p.idp.setTokenExpiration(1000 * time.Millisecond)
 
 	requests := []fakeRequest{
 		{
-			URI:           fakeAuthAllURL,
-			HasLogin:      true,
-			Redirects:     true,
-			OnResponse:    fn,
-			ExpectedProxy: true,
-			ExpectedCode:  http.StatusOK,
+			URI:                           fakeAuthAllURL,
+			HasLogin:                      true,
+			Redirects:                     true,
+			OnResponse:                    delay,
+			ExpectedProxy:                 true,
+			ExpectedCode:                  http.StatusOK,
+			ExpectedLoginCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieRefreshName: checkRefreshTokenEncryption},
 		},
 		{
-			URI:             fakeAuthAllURL,
-			Redirects:       false,
-			ExpectedProxy:   true,
-			ExpectedCode:    http.StatusOK,
-			ExpectedCookies: map[string]string{cfg.CookieAccessName: ""},
+			URI:                      fakeAuthAllURL,
+			Redirects:                false,
+			ExpectedProxy:            true,
+			ExpectedCode:             http.StatusOK,
+			ExpectedCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieRefreshName: checkRefreshTokenEncryption},
 		},
 	}
 	p.RunTests(t, requests)
 }
 
-func TestCheckEncryptedCookie(t *testing.T) {
+func TestAccessTokenCookieEncryption(t *testing.T) {
 	cfg := newFakeKeycloakConfig()
 	cfg.EnableRefreshTokens = true
 	cfg.EnableEncryptedToken = true
@@ -1233,7 +1260,7 @@ func TestCheckEncryptedCookie(t *testing.T) {
 	testEncryptedToken(t, cfg)
 }
 
-func TestCheckForcedEncryptedCookie(t *testing.T) {
+func TestForcedAccessTokenCookieEncryption(t *testing.T) {
 	cfg := newFakeKeycloakConfig()
 	cfg.EnableRefreshTokens = true
 	cfg.EnableEncryptedToken = false
@@ -1290,12 +1317,13 @@ func testEncryptedToken(t *testing.T, cfg *Config) {
 
 	requests := []fakeRequest{
 		{
-			URI:           fakeAuthAllURL,
-			HasLogin:      true,
-			Redirects:     true,
-			OnResponse:    delay,
-			ExpectedProxy: true,
-			ExpectedCode:  http.StatusOK,
+			URI:                           fakeAuthAllURL,
+			HasLogin:                      true,
+			Redirects:                     true,
+			OnResponse:                    delay,
+			ExpectedProxy:                 true,
+			ExpectedCode:                  http.StatusOK,
+			ExpectedLoginCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
 		},
 		{
 			URI:                      fakeAuthAllURL,
