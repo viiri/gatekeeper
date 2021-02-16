@@ -1250,27 +1250,6 @@ func TestRefreshTokenEncryption(t *testing.T) {
 	p.RunTests(t, requests)
 }
 
-func TestAccessTokenCookieEncryption(t *testing.T) {
-	cfg := newFakeKeycloakConfig()
-	cfg.EnableRefreshTokens = true
-	cfg.EnableEncryptedToken = true
-	cfg.Verbose = true
-	cfg.EnableLogging = true
-	cfg.EncryptionKey = testEncryptionKey
-	testEncryptedToken(t, cfg)
-}
-
-func TestForcedAccessTokenCookieEncryption(t *testing.T) {
-	cfg := newFakeKeycloakConfig()
-	cfg.EnableRefreshTokens = true
-	cfg.EnableEncryptedToken = false
-	cfg.ForceEncryptedCookie = true
-	cfg.Verbose = true
-	cfg.EnableLogging = true
-	cfg.EncryptionKey = testEncryptionKey
-	testEncryptedToken(t, cfg)
-}
-
 func delay(no int, req *resty.Request, resp *resty.Response) {
 	if no == 0 {
 		<-time.After(1000 * time.Millisecond)
@@ -1311,30 +1290,89 @@ func checkRefreshTokenEncryption(t *testing.T, cfg *Config, value string) bool {
 	return err == nil
 }
 
-func testEncryptedToken(t *testing.T, cfg *Config) {
-	p := newFakeProxy(cfg, &fakeAuthConfig{})
-	p.idp.setTokenExpiration(1000 * time.Millisecond)
+// nolint:funlen
+func TestAccessTokenEncryption(t *testing.T) {
+	cfg := newFakeKeycloakConfig()
 
-	requests := []fakeRequest{
+	testCases := []struct {
+		Name              string
+		ProxySettings     func(c *Config)
+		ExecutionSettings []fakeRequest
+	}{
 		{
-			URI:                           fakeAuthAllURL,
-			HasLogin:                      true,
-			Redirects:                     true,
-			OnResponse:                    delay,
-			ExpectedProxy:                 true,
-			ExpectedCode:                  http.StatusOK,
-			ExpectedLoginCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
+			Name: "TestEnableEncryptedToken",
+			ProxySettings: func(c *Config) {
+				c.EnableRefreshTokens = true
+				c.EnableEncryptedToken = true
+				c.Verbose = true
+				c.EnableLogging = true
+				c.EncryptionKey = testEncryptionKey
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:                           fakeAuthAllURL,
+					HasLogin:                      true,
+					Redirects:                     true,
+					OnResponse:                    delay,
+					ExpectedProxy:                 true,
+					ExpectedCode:                  http.StatusOK,
+					ExpectedLoginCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
+				},
+				{
+					URI:                      fakeAuthAllURL,
+					Redirects:                false,
+					ExpectedProxy:            true,
+					ExpectedCode:             http.StatusOK,
+					ExpectedCookies:          map[string]string{cfg.CookieAccessName: ""},
+					ExpectedCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
+				},
+			},
 		},
 		{
-			URI:                      fakeAuthAllURL,
-			Redirects:                false,
-			ExpectedProxy:            true,
-			ExpectedCode:             http.StatusOK,
-			ExpectedCookies:          map[string]string{cfg.CookieAccessName: ""},
-			ExpectedCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
+			Name: "ForceEncryptedCookie",
+			ProxySettings: func(c *Config) {
+				c.EnableRefreshTokens = true
+				c.EnableEncryptedToken = false
+				c.ForceEncryptedCookie = true
+				c.Verbose = true
+				c.EnableLogging = true
+				c.EncryptionKey = testEncryptionKey
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:                           fakeAuthAllURL,
+					HasLogin:                      true,
+					Redirects:                     true,
+					OnResponse:                    delay,
+					ExpectedProxy:                 true,
+					ExpectedCode:                  http.StatusOK,
+					ExpectedLoginCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
+				},
+				{
+					URI:                      fakeAuthAllURL,
+					Redirects:                false,
+					ExpectedProxy:            true,
+					ExpectedCode:             http.StatusOK,
+					ExpectedCookies:          map[string]string{cfg.CookieAccessName: ""},
+					ExpectedCookiesValidator: map[string]func(*testing.T, *Config, string) bool{cfg.CookieAccessName: checkAccessTokenEncryption},
+				},
+			},
 		},
 	}
-	p.RunTests(t, requests)
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		c := cfg
+		t.Run(
+			testCase.Name,
+			func(t *testing.T) {
+				testCase.ProxySettings(c)
+				p := newFakeProxy(c, &fakeAuthConfig{})
+				p.idp.setTokenExpiration(1000 * time.Millisecond)
+				p.RunTests(t, testCase.ExecutionSettings)
+			},
+		)
+	}
 }
 
 func TestCustomHeadersHandler(t *testing.T) {
