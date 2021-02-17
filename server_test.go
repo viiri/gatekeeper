@@ -146,15 +146,119 @@ func TestReverseProxyHeaders(t *testing.T) {
 				"X-Auth-Email":    "gambol99@gmail.com",
 				"X-Auth-Roles":    "role:admin,defaultclient:default",
 				"X-Auth-Subject":  token.claims.Sub,
-				"X-Auth-Token":    jwt,
 				"X-Auth-Userid":   "rjayawardene",
 				"X-Auth-Username": "rjayawardene",
+			},
+			ExpectedProxyHeadersValidator: map[string]func(*testing.T, *Config, string){
+				"X-Auth-Token": func(t *testing.T, c *Config, value string) {
+					assert.Equal(t, jwt, value)
+					assert.False(t, checkAccessTokenEncryption(t, c, value))
+				},
 			},
 			ExpectedCode:            http.StatusOK,
 			ExpectedContentContains: `"uri":"` + uri + `"`,
 		},
 	}
 	p.RunTests(t, requests)
+}
+
+func TestAuthTokenHeader(t *testing.T) {
+	cfg := newFakeKeycloakConfig()
+
+	testCases := []struct {
+		Name              string
+		ProxySettings     func(c *Config)
+		ExecutionSettings []fakeRequest
+	}{
+		{
+			Name: "TestClearTextWithEnableEncryptedToken",
+			ProxySettings: func(c *Config) {
+				c.EnableRefreshTokens = true
+				c.EnableEncryptedToken = true
+				c.EncryptionKey = testEncryptionKey
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:           fakeAuthAllURL,
+					HasLogin:      true,
+					Redirects:     true,
+					OnResponse:    delay,
+					ExpectedProxy: true,
+					ExpectedCode:  http.StatusOK,
+					ExpectedProxyHeadersValidator: map[string]func(*testing.T, *Config, string){
+						"X-Auth-Token": func(t *testing.T, c *Config, value string) {
+							_, err := jwt.ParseSigned(value)
+							assert.Nil(t, err, "Problem parsing X-Auth-Token")
+							assert.False(t, checkAccessTokenEncryption(t, c, value))
+						},
+					},
+				},
+				{
+					URI:           fakeAuthAllURL,
+					ExpectedProxy: true,
+					ExpectedProxyHeadersValidator: map[string]func(*testing.T, *Config, string){
+						"X-Auth-Token": func(t *testing.T, c *Config, value string) {
+							_, err := jwt.ParseSigned(value)
+							assert.Nil(t, err, "Problem parsing X-Auth-Token")
+							assert.False(t, checkAccessTokenEncryption(t, c, value))
+						},
+					},
+					ExpectedCode: http.StatusOK,
+				},
+			},
+		},
+		{
+			Name: "TestClearTextWithForceEncryptedCookie",
+			ProxySettings: func(c *Config) {
+				c.EnableEncryptedToken = false
+				c.ForceEncryptedCookie = true
+				c.EncryptionKey = testEncryptionKey
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:           fakeAuthAllURL,
+					HasLogin:      true,
+					Redirects:     true,
+					OnResponse:    delay,
+					ExpectedProxy: true,
+					ExpectedCode:  http.StatusOK,
+					ExpectedProxyHeadersValidator: map[string]func(*testing.T, *Config, string){
+						"X-Auth-Token": func(t *testing.T, c *Config, value string) {
+							_, err := jwt.ParseSigned(value)
+							assert.Nil(t, err, "Problem parsing X-Auth-Token")
+							assert.False(t, checkAccessTokenEncryption(t, c, value))
+						},
+					},
+				},
+				{
+					URI:           fakeAuthAllURL,
+					ExpectedProxy: true,
+					ExpectedProxyHeadersValidator: map[string]func(*testing.T, *Config, string){
+						"X-Auth-Token": func(t *testing.T, c *Config, value string) {
+							_, err := jwt.ParseSigned(value)
+							assert.Nil(t, err, "Problem parsing X-Auth-Token")
+							assert.False(t, checkAccessTokenEncryption(t, c, value))
+						},
+					},
+					ExpectedCode: http.StatusOK,
+				},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		c := cfg
+		t.Run(
+			testCase.Name,
+			func(t *testing.T) {
+				testCase.ProxySettings(c)
+				p := newFakeProxy(c, &fakeAuthConfig{})
+				// p.idp.setTokenExpiration(1000 * time.Millisecond)
+				p.RunTests(t, testCase.ExecutionSettings)
+			},
+		)
+	}
 }
 
 func TestForwardingProxy(t *testing.T) {

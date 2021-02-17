@@ -74,6 +74,7 @@ type fakeRequest struct {
 	ExpectedNoProxyHeaders        []string
 	ExpectedProxy                 bool
 	ExpectedProxyHeaders          map[string]string
+	ExpectedProxyHeadersValidator map[string]func(*testing.T, *Config, string)
 	ExpectedCookiesValidator      map[string]func(*testing.T, *Config, string) bool
 	ExpectedLoginCookiesValidator map[string]func(*testing.T, *Config, string) bool
 }
@@ -263,6 +264,17 @@ func (f *fakeProxy) RunTests(t *testing.T, requests []fakeRequest) {
 					assert.NotEmpty(t, headers.Get(k), "case %d, expected the proxy header: %s to exist", i, k)
 				default:
 					assert.Equal(t, v, headers.Get(k), "case %d, expected proxy header %s=%s, got: %s", i, k, v, headers.Get(k))
+				}
+			}
+		}
+		if c.ExpectedProxyHeadersValidator != nil && len(c.ExpectedProxyHeadersValidator) > 0 {
+			for k, v := range c.ExpectedProxyHeadersValidator {
+				headers := upstream.Headers
+				switch v {
+				case nil:
+					assert.NotNil(t, v, "Validation function is nil, forgot to configure?")
+				default:
+					v(t, f.config, headers.Get(k))
 				}
 			}
 		}
@@ -1290,7 +1302,6 @@ func checkRefreshTokenEncryption(t *testing.T, cfg *Config, value string) bool {
 	return err == nil
 }
 
-// nolint:funlen
 func TestAccessTokenEncryption(t *testing.T) {
 	cfg := newFakeKeycloakConfig()
 
