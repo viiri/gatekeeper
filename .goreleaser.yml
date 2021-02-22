@@ -38,6 +38,10 @@ builds:
   ldflags:
     - -s -w -X "main.build={{.Version}}" -X "main.gitsha={{ .FullCommit }}" -X "main.compiled={{ .Date }}"
 
+signs:
+  - artifacts: checksum
+    args: ["--batch", "-u", "{{ .Env.GPG_FINGERPRINT }}", "--output", "${signature}", "--detach-sign", "${artifact}"]
+
 # Generate the checksum for each file
 checksum:
   name_template: '{{ .ProjectName }}-checksum.txt'
