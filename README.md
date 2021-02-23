@@ -47,7 +47,7 @@ sha512sum /my/path/gatekeeper_1.2.2-rc2_linux_amd64.tar.gz
 
 As you can see output of command is checksum, you can compare it with the one in gatekeeper-checksum.txt.
 
-Additionaly to verify gatekeeper-checksum.txt is valid we provide also signature of checksum file gatekeeper-checksum.txt.sig.
+Additionally to verify gatekeeper-checksum.txt is valid we provide also signature of checksum file gatekeeper-checksum.txt.sig.
 
 You can validate signature with these steps:
 
