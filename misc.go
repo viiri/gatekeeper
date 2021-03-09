@@ -82,6 +82,20 @@ func (r *oauthProxy) accessForbidden(w http.ResponseWriter, req *http.Request) c
 	return r.revokeProxy(w, req)
 }
 
+// accessError redirects the user to the error page
+func (r *oauthProxy) accessError(w http.ResponseWriter, req *http.Request) context.Context {
+	w.WriteHeader(http.StatusBadRequest)
+	// are we using a custom http template for 400?
+	if r.config.hasCustomErrorPage() {
+		name := path.Base(r.config.ErrorPage)
+		if err := r.Render(w, name, r.config.Tags); err != nil {
+			r.log.Error("failed to render the template", zap.Error(err), zap.String("template", name))
+		}
+	}
+
+	return r.revokeProxy(w, req)
+}
+
 // redirectToURL redirects the user and aborts the context
 func (r *oauthProxy) redirectToURL(url string, w http.ResponseWriter, req *http.Request, statusCode int) context.Context {
 	w.Header().Add("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
