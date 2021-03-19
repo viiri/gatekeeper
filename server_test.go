@@ -344,44 +344,69 @@ func TestForbiddenTemplate(t *testing.T) {
 
 func TestErrorTemplate(t *testing.T) {
 	cfg := newFakeKeycloakConfig()
-	cfg.ErrorPage = "templates/error.html.tmpl"
-	requests := []fakeRequest{
-		{
-			URI:                     "/oauth/callback",
-			Redirects:               true,
-			ExpectedCode:            http.StatusBadRequest,
-			ExpectedContentContains: "400 Bad Request",
-		},
-	}
-	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
-}
 
-func TestErrorTemplateWithError(t *testing.T) {
-	cfg := newFakeKeycloakConfig()
-	cfg.ErrorPage = "templates/error-bad-formatted.html.tmpl"
-	requests := []fakeRequest{
+	testCases := []struct {
+		Name              string
+		ProxySettings     func(c *Config)
+		ExecutionSettings []fakeRequest
+	}{
 		{
-			URI:                     "/oauth/callback",
-			Redirects:               true,
-			ExpectedCode:            http.StatusBadRequest,
-			ExpectedContentContains: "",
+			Name: "TestErrorTemplateDisplayed",
+			ProxySettings: func(c *Config) {
+				c.ErrorPage = "templates/error.html.tmpl"
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:                     "/oauth/callback",
+					Redirects:               true,
+					ExpectedCode:            http.StatusBadRequest,
+					ExpectedContentContains: "400 Bad Request",
+				},
+			},
+		},
+		{
+			Name: "TestWithBadErrorTemplate",
+			ProxySettings: func(c *Config) {
+				c.ErrorPage = "templates/error-bad-formatted.html.tmpl"
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:                     "/oauth/callback",
+					Redirects:               true,
+					ExpectedCode:            http.StatusBadRequest,
+					ExpectedContentContains: "",
+				},
+			},
+		},
+		{
+			Name: "TestWithEmptyErrorTemplate",
+			ProxySettings: func(c *Config) {
+				c.ErrorPage = ""
+			},
+			ExecutionSettings: []fakeRequest{
+				{
+					URI:                     "/oauth/callback",
+					Redirects:               true,
+					ExpectedCode:            http.StatusBadRequest,
+					ExpectedContentContains: "",
+				},
+			},
 		},
 	}
-	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
-}
 
-func TestEmptyErrorTemplate(t *testing.T) {
-	cfg := newFakeKeycloakConfig()
-	cfg.ErrorPage = ""
-	requests := []fakeRequest{
-		{
-			URI:                     "/oauth/callback",
-			Redirects:               true,
-			ExpectedCode:            http.StatusBadRequest,
-			ExpectedContentContains: "",
-		},
+	for _, testCase := range testCases {
+		testCase := testCase
+		cfgCopy := *cfg
+		c := &cfgCopy
+		t.Run(
+			testCase.Name,
+			func(t *testing.T) {
+				testCase.ProxySettings(c)
+				p := newFakeProxy(c, &fakeAuthConfig{})
+				p.RunTests(t, testCase.ExecutionSettings)
+			},
+		)
 	}
-	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
 }
 
 func TestSkipOpenIDProviderTLSVerify(t *testing.T) {
