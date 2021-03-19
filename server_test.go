@@ -248,7 +248,8 @@ func TestAuthTokenHeader(t *testing.T) {
 
 	for _, testCase := range testCases {
 		testCase := testCase
-		c := cfg
+		cfgCopy := *cfg
+		c := &cfgCopy
 		t.Run(
 			testCase.Name,
 			func(t *testing.T) {
@@ -912,7 +913,13 @@ func newFakeKeycloakConfig() *Config {
 		EnableLoginHandler:          true,
 		EnableTokenHeader:           true,
 		EnableCompression:           false,
+		EnableMetrics:               false,
 		Listen:                      "127.0.0.1:0",
+		ListenAdmin:                 "",
+		ListenAdminScheme:           "http",
+		TLSAdminCertificate:         "",
+		TLSAdminPrivateKey:          "",
+		TLSAdminCaCertificate:       "",
 		OAuthURI:                    "/oauth",
 		OpenIDProviderTimeout:       time.Second * 5,
 		SkipOpenIDProviderTLSVerify: false,
@@ -1054,7 +1061,7 @@ func (t *fakeToken) getToken() (string, error) {
 	}
 
 	var priv interface{}
-	priv, err0 := x509.ParsePKCS1PrivateKey(input)
+	priv, err0 := x509.ParsePKCS8PrivateKey(input)
 
 	if err0 != nil {
 		return "", err0
@@ -1087,7 +1094,7 @@ func (t *fakeToken) getUnsignedToken() (string, error) {
 	}
 
 	var priv interface{}
-	priv, err0 := x509.ParsePKCS1PrivateKey(input)
+	priv, err0 := x509.ParsePKCS8PrivateKey(input)
 
 	if err0 != nil {
 		return "", err0
