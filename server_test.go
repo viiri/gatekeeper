@@ -342,6 +342,48 @@ func TestForbiddenTemplate(t *testing.T) {
 	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
 }
 
+func TestErrorTemplate(t *testing.T) {
+	cfg := newFakeKeycloakConfig()
+	cfg.ErrorPage = "templates/error.html.tmpl"
+	requests := []fakeRequest{
+		{
+			URI:                     "/oauth/callback",
+			Redirects:               true,
+			ExpectedCode:            http.StatusBadRequest,
+			ExpectedContentContains: "400 Bad Request",
+		},
+	}
+	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
+}
+
+func TestErrorTemplateWithError(t *testing.T) {
+	cfg := newFakeKeycloakConfig()
+	cfg.ErrorPage = "templates/error-bad-formatted.html.tmpl"
+	requests := []fakeRequest{
+		{
+			URI:                     "/oauth/callback",
+			Redirects:               true,
+			ExpectedCode:            http.StatusBadRequest,
+			ExpectedContentContains: "",
+		},
+	}
+	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
+}
+
+func TestEmptyErrorTemplate(t *testing.T) {
+	cfg := newFakeKeycloakConfig()
+	cfg.ErrorPage = ""
+	requests := []fakeRequest{
+		{
+			URI:                     "/oauth/callback",
+			Redirects:               true,
+			ExpectedCode:            http.StatusBadRequest,
+			ExpectedContentContains: "",
+		},
+	}
+	newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, requests)
+}
+
 func TestSkipOpenIDProviderTLSVerify(t *testing.T) {
 	c := newFakeKeycloakConfig()
 	c.SkipOpenIDProviderTLSVerify = true

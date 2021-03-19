@@ -651,6 +651,11 @@ func (r *oauthProxy) createTemplates() error {
 		list = append(list, r.config.ForbiddenPage)
 	}
 
+	if r.config.ErrorPage != "" {
+		r.log.Debug("loading the custom error page", zap.String("page", r.config.ErrorPage))
+		list = append(list, r.config.ErrorPage)
+	}
+
 	if len(list) > 0 {
 		r.log.Info("loading the custom templates", zap.String("templates", strings.Join(list, ",")))
 		r.templates = template.Must(template.ParseFiles(list...))

@@ -342,6 +342,8 @@ type Config struct {
 	SignInPage string `json:"sign-in-page" yaml:"sign-in-page" usage:"path to custom template displayed for signin"`
 	// ForbiddenPage is a access forbidden page
 	ForbiddenPage string `json:"forbidden-page" yaml:"forbidden-page" usage:"path to custom template used for access forbidden"`
+	// ErrorPage is the relative url for the custom error page
+	ErrorPage string `json:"error-page" yaml:"error-page" usage:"path to custom template displayed for http.StatusBadRequest"`
 	// Tags is passed to the templates
 	Tags map[string]string `json:"tags" yaml:"tags" usage:"keypairs passed to the templates at render,e.g title=Page"`
 

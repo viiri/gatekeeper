@@ -109,7 +109,7 @@ func (r *oauthProxy) oauthCallbackHandler(w http.ResponseWriter, req *http.Reque
 	// step: ensure we have a authorization code
 	code := req.URL.Query().Get("code")
 	if code == "" {
-		w.WriteHeader(http.StatusBadRequest)
+		r.accessError(w, req)
 		return
 	}
 
@@ -477,7 +477,7 @@ func (r *oauthProxy) logoutHandler(w http.ResponseWriter, req *http.Request) {
 	// @step: drop the access token
 	user, err := r.getIdentity(req)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		r.accessError(w, req)
 		return
 	}
 
@@ -624,7 +624,7 @@ func (r *oauthProxy) expirationHandler(w http.ResponseWriter, req *http.Request)
 func (r *oauthProxy) tokenHandler(w http.ResponseWriter, req *http.Request) {
 	user, err := r.getIdentity(req)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		r.accessError(w, req)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

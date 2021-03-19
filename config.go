@@ -220,3 +220,8 @@ func (r *Config) hasCustomSignInPage() bool {
 func (r *Config) hasCustomForbiddenPage() bool {
 	return r.ForbiddenPage != ""
 }
+
+// hasCustomErrorPage checks if there is a custom error page
+func (r *Config) hasCustomErrorPage() bool {
+	return r.ErrorPage != ""
+}
