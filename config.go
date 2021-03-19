@@ -70,6 +70,7 @@ func newDefaultConfig() *Config {
 		UpstreamTLSHandshakeTimeout:   10 * time.Second,
 		UpstreamTimeout:               10 * time.Second,
 		UseLetsEncrypt:                false,
+		ForwardingGrantType:           GrantTypeUserCreds,
 	}
 }
 
@@ -83,6 +84,7 @@ func (r *Config) WithOAuthURI(uri string) string {
 }
 
 // isValid validates if the config is valid
+// nolint:gocyclo
 func (r *Config) isValid() error {
 	if r.Listen == "" {
 		return errors.New("you have not specified the listening interface")
@@ -125,11 +127,18 @@ func (r *Config) isValid() error {
 		if r.DiscoveryURL == "" {
 			return errors.New("you have not specified the discovery url")
 		}
-		if r.ForwardingUsername == "" {
-			return errors.New("no forwarding username")
+		if r.ForwardingGrantType == GrantTypeUserCreds {
+			if r.ForwardingUsername == "" {
+				return errors.New("no forwarding username")
+			}
+			if r.ForwardingPassword == "" {
+				return errors.New("no forwarding password")
+			}
 		}
-		if r.ForwardingPassword == "" {
-			return errors.New("no forwarding password")
+		if r.ForwardingGrantType == GrantTypeClientCreds {
+			if r.ClientSecret == "" {
+				return errors.New("you have not specified the client secret")
+			}
 		}
 		if r.TLSCertificate != "" {
 			return errors.New("you don't need to specify a tls-certificate, use tls-ca-certificate instead")

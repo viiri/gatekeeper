@@ -289,10 +289,12 @@ func (r *fakeAuthServer) tokenHandler(w http.ResponseWriter, req *http.Request) 
 	case GrantTypeUserCreds:
 		username := req.FormValue("username")
 		password := req.FormValue("password")
+
 		if username == "" || password == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+
 		if username == validUsername && password == validPassword {
 			renderJSON(http.StatusOK, w, req, tokenResponse{
 				IDToken:      jwt,
@@ -302,6 +304,30 @@ func (r *fakeAuthServer) tokenHandler(w http.ResponseWriter, req *http.Request) 
 			})
 			return
 		}
+
+		renderJSON(http.StatusUnauthorized, w, req, map[string]string{
+			"error":             "invalid_grant",
+			"error_description": "invalid user credentials",
+		})
+	case GrantTypeClientCreds:
+		clientID := req.FormValue("client_id")
+		clientSecret := req.FormValue("client_secret")
+
+		if clientID == "" || clientSecret == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		if clientID == validUsername && clientSecret == validPassword {
+			renderJSON(http.StatusOK, w, req, tokenResponse{
+				IDToken:      jwt,
+				AccessToken:  jwt,
+				RefreshToken: jwt,
+				ExpiresIn:    float64(expires.UTC().Second()),
+			})
+			return
+		}
+
 		renderJSON(http.StatusUnauthorized, w, req, map[string]string{
 			"error":             "invalid_grant",
 			"error_description": "invalid user credentials",
