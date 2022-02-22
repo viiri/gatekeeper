@@ -148,7 +148,19 @@ func (r *Config) isValid() error {
 	if r.UseLetsEncrypt && r.LetsEncryptCacheDir == "" {
 		return fmt.Errorf("the letsencrypt cache dir has not been set")
 	}
-
+	switch strings.ToLower(r.TLSMinVersion) {
+	case "":
+	// nolint: goconst
+	case "tlsv1.0":
+	// nolint: goconst
+	case "tlsv1.1":
+	// nolint: goconst
+	case "tlsv1.2":
+	// nolint: goconst
+	case "tlsv1.3":
+	default:
+		return fmt.Errorf("invalid minimal TLS version specified")
+	}
 	if r.EnableForwarding {
 		if r.ClientID == "" {
 			return errors.New("you have not specified the client id")
