@@ -18,7 +18,10 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
+
+	"github.com/gogatekeeper/gatekeeper/pkg/authorization"
 
 	"go.uber.org/zap"
 )
@@ -78,6 +81,54 @@ func (r *oauthProxy) DeleteRefreshToken(token string) error {
 	}
 
 	return nil
+}
+
+// StoreAuthz
+// nolint:interfacer
+func (r *oauthProxy) StoreAuthz(token string, url *url.URL, value authorization.AuthzDecision, expiration time.Duration) error {
+	if len(token) == 0 {
+		return fmt.Errorf("token of zero length")
+	}
+
+	tokenHash := getHashKey(token)
+	pathHash := getHashKey(url.Path)
+	hash := fmt.Sprintf("%s%s", pathHash, tokenHash)
+	return r.store.Set(hash, value.String(), expiration)
+}
+
+// Get retrieves a authz decision from store
+func (r *oauthProxy) GetAuthz(token string, url *url.URL) (authorization.AuthzDecision, error) {
+	if len(token) == 0 {
+		return authorization.UndefinedAuthz, ErrZeroLengthToken
+	}
+
+	tokenHash := getHashKey(token)
+	pathHash := getHashKey(url.Path)
+	hash := fmt.Sprintf("%s%s", pathHash, tokenHash)
+
+	exists, err := r.store.Exists(hash)
+
+	if err != nil {
+		return authorization.UndefinedAuthz, err
+	}
+
+	if !exists {
+		return authorization.UndefinedAuthz, ErrNoAuthzFound
+	}
+
+	val, err := r.store.Get(hash)
+
+	if err != nil {
+		return authorization.UndefinedAuthz, err
+	}
+
+	decision, err := strconv.Atoi(val)
+
+	if err != nil {
+		return authorization.UndefinedAuthz, err
+	}
+
+	return authorization.AuthzDecision(decision), nil
 }
 
 // Close is used to close off any resources
