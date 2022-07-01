@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/gogatekeeper/gatekeeper/pkg/apperrors"
 	"github.com/gogatekeeper/gatekeeper/pkg/authorization"
 	"github.com/stretchr/testify/assert"
 )
@@ -231,7 +232,7 @@ func TestGetAuthz(t *testing.T) {
 						t.Fatalf("error getting authz %s", err)
 					}
 
-					if dec != authorization.UndefinedAuthz {
+					if dec != authorization.DeniedAuthz {
 						t.Fatalf("expected undefined authz decision, got %s", dec)
 					}
 
@@ -239,8 +240,8 @@ func TestGetAuthz(t *testing.T) {
 						t.Fatalf("expected error %s, got %s", ErrZeroLengthToken, err)
 					}
 
-					if testCase.JWT != "" && err != ErrNoAuthzFound && !strings.Contains(c.StoreURL, "failed") {
-						t.Fatalf("expected error %s, got %s", ErrNoAuthzFound, err)
+					if testCase.JWT != "" && err != apperrors.ErrNoAuthzFound && !strings.Contains(c.StoreURL, "failed") {
+						t.Fatalf("expected error %s, got %s", apperrors.ErrNoAuthzFound, err)
 					}
 				}
 
