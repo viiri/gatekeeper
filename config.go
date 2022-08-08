@@ -203,6 +203,7 @@ func (r *Config) isSameSiteValid() error {
 	return nil
 }
 
+//nolint:cyclop
 func (r *Config) isTLSFilesValid() error {
 	if r.TLSCertificate != "" && r.TLSPrivateKey == "" {
 		return errors.New("you have not provided a private key")
@@ -237,6 +238,7 @@ func (r *Config) isTLSFilesValid() error {
 	return nil
 }
 
+//nolint:cyclop
 func (r *Config) isAdminTLSFilesValid() error {
 	if r.TLSAdminCertificate != "" && r.TLSAdminPrivateKey == "" {
 		return errors.New("you have not provided a private key for admin endpoint")
@@ -290,13 +292,13 @@ func (r *Config) isTLSMinValid() error {
 	switch strings.ToLower(r.TLSMinVersion) {
 	case "":
 		return fmt.Errorf("minimal TLS version should not be empty")
-	// nolint: goconst
+	//nolint: goconst
 	case "tlsv1.0":
-	// nolint: goconst
+	//nolint: goconst
 	case "tlsv1.1":
-	// nolint: goconst
+	//nolint: goconst
 	case "tlsv1.2":
-	// nolint: goconst
+	//nolint: goconst
 	case "tlsv1.3":
 	default:
 		return fmt.Errorf("invalid minimal TLS version specified")
