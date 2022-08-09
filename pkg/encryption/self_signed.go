@@ -14,22 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package encryption
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"io/ioutil"
+	"math/big"
+	"net"
 	"sync"
 	"time"
 
-	"github.com/gogatekeeper/gatekeeper/pkg/utils"
 	"go.uber.org/zap"
 )
 
-type selfSignedCertificate struct {
+type SelfSignedCertificate struct {
 	sync.RWMutex
 	// certificate holds the current issuing certificate
 	certificate tls.Certificate
@@ -46,7 +51,7 @@ type selfSignedCertificate struct {
 }
 
 // newSelfSignedCertificate creates and returns a self signed certificate manager
-func newSelfSignedCertificate(hostnames []string, expiry time.Duration, log *zap.Logger) (*selfSignedCertificate, error) {
+func NewSelfSignedCertificate(hostnames []string, expiry time.Duration, log *zap.Logger) (*SelfSignedCertificate, error) {
 	if len(hostnames) == 0 {
 		return nil, fmt.Errorf("no hostnames specified")
 	}
@@ -68,7 +73,7 @@ func newSelfSignedCertificate(hostnames []string, expiry time.Duration, log *zap
 	}
 
 	// @step: create an initial certificate
-	certificate, err := utils.CreateCertificate(key, hostnames, expiry)
+	certificate, err := CreateCertificate(key, hostnames, expiry)
 
 	if err != nil {
 		return nil, err
@@ -77,7 +82,7 @@ func newSelfSignedCertificate(hostnames []string, expiry time.Duration, log *zap
 	// @step: create a context to run under
 	ctx, cancel := context.WithCancel(context.Background())
 
-	svc := &selfSignedCertificate{
+	svc := &SelfSignedCertificate{
 		certificate: certificate,
 		expiration:  expiry,
 		hostnames:   hostnames,
@@ -94,7 +99,7 @@ func newSelfSignedCertificate(hostnames []string, expiry time.Duration, log *zap
 }
 
 // rotate is responsible for rotation the certificate
-func (c *selfSignedCertificate) rotate(ctx context.Context) error {
+func (c *SelfSignedCertificate) rotate(ctx context.Context) error {
 	go func() {
 		c.log.Info("starting the self-signed certificate rotation",
 			zap.Duration("expiration", c.expiration))
@@ -114,7 +119,7 @@ func (c *selfSignedCertificate) rotate(ctx context.Context) error {
 			time.Sleep(time.Until(expires))
 
 			// @step: create a new certificate for us
-			cert, _ := utils.CreateCertificate(c.privateKey, c.hostnames, c.expiration)
+			cert, _ := CreateCertificate(c.privateKey, c.hostnames, c.expiration)
 			c.log.Info("updating the certificate for server")
 
 			// @step: update the current certificate
@@ -127,12 +132,12 @@ func (c *selfSignedCertificate) rotate(ctx context.Context) error {
 
 // Deprecated:unused
 // close is used to shutdown resources
-func (c *selfSignedCertificate) close() {
+func (c *SelfSignedCertificate) close() {
 	c.cancel()
 }
 
 // updateCertificate is responsible for update the certificate
-func (c *selfSignedCertificate) updateCertificate(cert tls.Certificate) {
+func (c *SelfSignedCertificate) updateCertificate(cert tls.Certificate) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -140,9 +145,80 @@ func (c *selfSignedCertificate) updateCertificate(cert tls.Certificate) {
 }
 
 // GetCertificate is responsible for retrieving
-func (c *selfSignedCertificate) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (c *SelfSignedCertificate) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	c.RLock()
 	defer c.RUnlock()
 
 	return &c.certificate, nil
+}
+
+// createCertificate is responsible for creating a certificate
+func CreateCertificate(key *rsa.PrivateKey, hostnames []string, expire time.Duration) (tls.Certificate, error) {
+	// @step: create a serial for the certificate
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	template := x509.Certificate{
+		BasicConstraintsValid: true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:                  false,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		NotAfter:              time.Now().Add(expire),
+		NotBefore:             time.Now().Add(-30 * time.Second),
+		PublicKeyAlgorithm:    x509.ECDSA,
+		SerialNumber:          serial,
+		SignatureAlgorithm:    x509.SHA512WithRSA,
+		Subject: pkix.Name{
+			CommonName:   hostnames[0],
+			Organization: []string{"Gatekeeper"},
+		},
+	}
+
+	// @step: add the hostnames to the certificate template
+	if len(hostnames) > 1 {
+		for _, x := range hostnames[1:] {
+			if ip := net.ParseIP(x); ip != nil {
+				template.IPAddresses = append(template.IPAddresses, ip)
+			} else {
+				template.DNSNames = append(template.DNSNames, x)
+			}
+		}
+	}
+
+	// @step: create the certificate
+	cert, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+
+	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// loadCA loads the certificate authority
+func LoadCA(cert, key string) (*tls.Certificate, error) {
+	caCert, err := ioutil.ReadFile(cert)
+
+	if err != nil {
+		return nil, err
+	}
+
+	caKey, err := ioutil.ReadFile(key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	cAuthority, err := tls.X509KeyPair(caCert, caKey)
+
+	if err != nil {
+		return nil, err
+	}
+
+	cAuthority.Leaf, err = x509.ParseCertificate(cAuthority.Certificate[0])
+
+	return &cAuthority, err
 }
