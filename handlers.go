@@ -728,22 +728,8 @@ func (r *oauthProxy) logoutHandler(writer http.ResponseWriter, req *http.Request
 			),
 		)
 
-		// @step: if no redirect uri is set
-		if redirectURL == "" {
-			// @step: we first check for a redirection-url and then host header
-			if r.config.RedirectionURL != "" {
-				redirectURL = r.config.RedirectionURL
-			} else {
-				redirectURL = utils.GetRequestHostURL(req)
-			}
-		}
-
 		r.redirectToURL(
-			fmt.Sprintf(
-				"%s?redirect_uri=%s",
-				sendTo,
-				url.QueryEscape(redirectURL),
-			),
+			sendTo,
 			writer,
 			req,
 			http.StatusSeeOther,
