@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Nerzal/gocloak/v12"
+	"github.com/gogatekeeper/gatekeeper/pkg/apperrors"
 	"github.com/gogatekeeper/gatekeeper/pkg/constant"
 	"go.uber.org/zap"
 	"gopkg.in/square/go-jose.v2/jwt"
@@ -129,7 +130,7 @@ func (r *oauthProxy) redirectToURL(url string, wrt http.ResponseWriter, req *htt
 }
 
 // redirectToAuthorization redirects the user to authorization handler
-func (r *oauthProxy) redirectToAuthorization(wrt http.ResponseWriter, req *http.Request) context.Context {
+func (r *oauthProxy) redirectToAuthorization(wrt http.ResponseWriter, req *http.Request) context.Context { //nolint:cyclop
 	if r.config.NoRedirects && !r.config.EnableUma {
 		wrt.WriteHeader(http.StatusUnauthorized)
 		return r.revokeProxy(wrt, req)
@@ -250,8 +251,29 @@ func (r *oauthProxy) redirectToAuthorization(wrt http.ResponseWriter, req *http.
 		return r.revokeProxy(wrt, req)
 	}
 
+	url := r.config.WithOAuthURI(constant.AuthorizationURL + authQuery)
+
+	if r.config.NoProxy && !r.config.NoRedirects {
+		xForwardedHost := req.Header.Get("X-Forwarded-Host")
+		xProto := req.Header.Get("X-Forwarded-Proto")
+
+		if xForwardedHost == "" || xProto == "" {
+			r.log.Error(apperrors.ErrForwardAuthMissingHeaders.Error())
+
+			wrt.WriteHeader(http.StatusForbidden)
+			return r.revokeProxy(wrt, req)
+		}
+
+		url = fmt.Sprintf(
+			"%s://%s%s",
+			xProto,
+			xForwardedHost,
+			url,
+		)
+	}
+
 	r.redirectToURL(
-		r.config.WithOAuthURI(constant.AuthorizationURL+authQuery),
+		url,
 		wrt,
 		req,
 		http.StatusSeeOther,
