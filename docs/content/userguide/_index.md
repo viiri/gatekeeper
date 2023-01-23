@@ -1,3 +1,8 @@
+---
+title: "User Guide"
+weight: 1
+---
+
 # Gatekeeper
 
 Gatekeeper is a proxy which integrates with OpenID Connect (OIDC) Providers, it supports both access tokens in a browser cookie or bearer tokens.

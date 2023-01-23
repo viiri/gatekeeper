@@ -1,3 +1,7 @@
+---
+title: "Configuration Reference"
+weight: 2
+---
 
 | CONFIG                                     | DESCRIPTION | DEFAULT | ENV |
 --- | --- | --- | ---
