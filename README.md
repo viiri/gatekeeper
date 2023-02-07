@@ -1,5 +1,6 @@
+![gogatekeeper](docs/static/logo/gate-readme.png) 
 
-# Gatekeeper
+<br>
 
 This repository is a work in progress and contains the source code for the Gatekeeper. You should be able to see what's being planned at our [milestones page](https://github.com/gogatekeeper/gatekeeper/milestones).
 
