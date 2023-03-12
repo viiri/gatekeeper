@@ -46,6 +46,7 @@ func newDefaultConfig() *Config {
 	return &Config{
 		AccessTokenDuration:           time.Duration(720) * time.Hour,
 		CookieAccessName:              constant.AccessCookie,
+		CookieIDTokenName:             constant.IDTokenCookie,
 		CookieRefreshName:             constant.RefreshCookie,
 		CookieOAuthStateName:          constant.RequestStateCookie,
 		CookieRequestURIName:          constant.RequestURICookie,
@@ -544,7 +545,7 @@ func (r *Config) isTokenEncryptionValid() error {
 
 	if r.EnableRefreshTokens && r.EncryptionKey == "" {
 		return errors.New(
-			"you have not specified an encryption key for encoding the session state",
+			"enable refresh tokens requires encryption key to be defined",
 		)
 	}
 

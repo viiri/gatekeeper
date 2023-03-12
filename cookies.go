@@ -134,6 +134,11 @@ func (r *oauthProxy) dropRefreshTokenCookie(req *http.Request, w http.ResponseWr
 	r.dropCookieWithChunks(req, w, r.config.CookieRefreshName, value, duration)
 }
 
+// dropIdTokenCookie drops a id token cookie from the response
+func (r *oauthProxy) dropIDTokenCookie(req *http.Request, w http.ResponseWriter, value string, duration time.Duration) {
+	r.dropCookieWithChunks(req, w, r.config.CookieIDTokenName, value, duration)
+}
+
 // writeStateParameterCookie sets a state parameter cookie into the response
 func (r *oauthProxy) writeStateParameterCookie(req *http.Request, wrt http.ResponseWriter) string {
 	uuid, err := uuid.NewV4()
@@ -166,6 +171,7 @@ func (r *oauthProxy) writePKCECookie(req *http.Request, wrt http.ResponseWriter,
 func (r *oauthProxy) clearAllCookies(req *http.Request, w http.ResponseWriter) {
 	r.clearAccessTokenCookie(req, w)
 	r.clearRefreshTokenCookie(req, w)
+	r.clearIDTokenCookie(req, w)
 }
 
 // clearRefreshSessionCookie clears the session cookie
@@ -203,6 +209,28 @@ func (r *oauthProxy) clearAccessTokenCookie(req *http.Request, wrt http.Response
 				wrt,
 				req.Host,
 				r.config.CookieAccessName+"-"+strconv.Itoa(idx),
+				"",
+				-10*time.Hour,
+			)
+		} else {
+			break
+		}
+	}
+}
+
+// clearAccessTokenCookie clears the session cookie
+func (r *oauthProxy) clearIDTokenCookie(req *http.Request, wrt http.ResponseWriter) {
+	r.dropCookie(wrt, req.Host, r.config.CookieIDTokenName, "", -10*time.Hour)
+
+	// clear divided cookies
+	for idx := 1; idx < len(req.Cookies()); idx++ {
+		var _, err = req.Cookie(r.config.CookieIDTokenName + "-" + strconv.Itoa(idx))
+
+		if err == nil {
+			r.dropCookie(
+				wrt,
+				req.Host,
+				r.config.CookieIDTokenName+"-"+strconv.Itoa(idx),
 				"",
 				-10*time.Hour,
 			)

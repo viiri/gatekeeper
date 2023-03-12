@@ -316,11 +316,17 @@ func (r *oauthProxy) oauthCallbackHandler(writer http.ResponseWriter, req *http.
 	}
 
 	accessToken := rawToken
+	identityToken := rawIDToken
 
 	// step: are we encrypting the access token?
 	if r.config.EnableEncryptedToken || r.config.ForceEncryptedCookie {
 		if accessToken, err = encryption.EncodeText(accessToken, r.config.EncryptionKey); err != nil {
 			scope.Logger.Error("unable to encode the access token", zap.Error(err))
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if identityToken, err = encryption.EncodeText(identityToken, r.config.EncryptionKey); err != nil {
+			scope.Logger.Error("unable to encode the id token", zap.Error(err))
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -370,6 +376,13 @@ func (r *oauthProxy) oauthCallbackHandler(writer http.ResponseWriter, req *http.
 			r.getAccessCookieExpiration(resp.RefreshToken),
 		)
 
+		r.dropIDTokenCookie(
+			req,
+			writer,
+			identityToken,
+			r.getAccessCookieExpiration(resp.RefreshToken),
+		)
+
 		var expiration time.Duration
 		// notes: not all idp refresh tokens are readable, google for example, so we attempt to decode into
 		// a jwt and if possible extract the expiration, else we default to 10 days
@@ -416,6 +429,12 @@ func (r *oauthProxy) oauthCallbackHandler(writer http.ResponseWriter, req *http.
 			req,
 			writer,
 			accessToken,
+			time.Until(stdClaims.Expiry.Time()),
+		)
+		r.dropIDTokenCookie(
+			req,
+			writer,
+			identityToken,
 			time.Until(stdClaims.Expiry.Time()),
 		)
 	}
@@ -520,14 +539,14 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 		oauthLatencyMetric.WithLabelValues("login").Observe(time.Since(start).Seconds())
 
 		accessToken := token.AccessToken
-		refreshToken := token.RefreshToken
-		webToken, err := jwt.ParseSigned(token.AccessToken)
+		refreshToken := ""
+		accessTokenObj, err := jwt.ParseSigned(token.AccessToken)
 
 		if err != nil {
 			return "unable to decode the access token", http.StatusNotImplemented, err
 		}
 
-		identity, err := extractIdentity(webToken)
+		identity, err := extractIdentity(accessTokenObj)
 
 		if err != nil {
 			return "unable to extract identity from access token",
@@ -553,7 +572,7 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 		}
 
 		// step: are we encrypting the access token?
-		var plainIDToken string
+		plainIDToken := idToken
 
 		if r.config.EnableEncryptedToken || r.config.ForceEncryptedCookie {
 			if accessToken, err = encryption.EncodeText(accessToken, r.config.EncryptionKey); err != nil {
@@ -562,15 +581,6 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 					http.StatusInternalServerError,
 					err
 			}
-
-			if refreshToken, err = encryption.EncodeText(refreshToken, r.config.EncryptionKey); err != nil {
-				scope.Logger.Error("unable to encode the refresh token", zap.Error(err))
-				return "unable to encode the refresh token",
-					http.StatusInternalServerError,
-					err
-			}
-
-			plainIDToken = idToken
 
 			if idToken, err = encryption.EncodeText(idToken, r.config.EncryptionKey); err != nil {
 				scope.Logger.Error("unable to encode the idToken token", zap.Error(err))
@@ -582,8 +592,7 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 
 		// step: does the response have a refresh token and we do NOT ignore refresh tokens?
 		if r.config.EnableRefreshTokens && token.RefreshToken != "" {
-			var encrypted string
-			encrypted, err = encryption.EncodeText(token.RefreshToken, r.config.EncryptionKey)
+			refreshToken, err = encryption.EncodeText(token.RefreshToken, r.config.EncryptionKey)
 
 			if err != nil {
 				scope.Logger.Error("failed to encrypt the refresh token", zap.Error(err))
@@ -600,10 +609,17 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 				r.getAccessCookieExpiration(token.RefreshToken),
 			)
 
+			r.dropIDTokenCookie(
+				req,
+				writer,
+				idToken,
+				r.getAccessCookieExpiration(token.RefreshToken),
+			)
+
 			var expiration time.Duration
 			// notes: not all idp refresh tokens are readable, google for example, so we attempt to decode into
 			// a jwt and if possible extract the expiration, else we default to 10 days
-			refreshToken, errRef := jwt.ParseSigned(token.RefreshToken)
+			refreshTokenObj, errRef := jwt.ParseSigned(token.RefreshToken)
 
 			if errRef != nil {
 				scope.Logger.Error("failed to parse refresh token", zap.Error(errRef))
@@ -614,7 +630,7 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 
 			stdRefreshClaims := &jwt.Claims{}
 
-			err = refreshToken.UnsafeClaimsWithoutVerification(stdRefreshClaims)
+			err = refreshTokenObj.UnsafeClaimsWithoutVerification(stdRefreshClaims)
 
 			if err != nil {
 				expiration = 0
@@ -624,20 +640,26 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 
 			switch r.useStore() {
 			case true:
-				if err = r.StoreRefreshToken(token.AccessToken, encrypted, expiration); err != nil {
+				if err = r.StoreRefreshToken(token.AccessToken, refreshToken, expiration); err != nil {
 					scope.Logger.Warn(
 						"failed to save the refresh token in the store",
 						zap.Error(err),
 					)
 				}
 			default:
-				r.dropRefreshTokenCookie(req, writer, encrypted, expiration)
+				r.dropRefreshTokenCookie(req, writer, refreshToken, expiration)
 			}
 		} else {
 			r.dropAccessTokenCookie(
 				req,
 				writer,
 				accessToken,
+				time.Until(identity.expiresAt),
+			)
+			r.dropIDTokenCookie(
+				req,
+				writer,
+				idToken,
 				time.Until(identity.expiresAt),
 			)
 		}
@@ -671,7 +693,7 @@ func (r *oauthProxy) loginHandler(writer http.ResponseWriter, req *http.Request)
 			resp = tokenResponse{
 				IDToken:      plainIDToken,
 				AccessToken:  token.AccessToken,
-				RefreshToken: token.RefreshToken,
+				RefreshToken: refreshToken,
 				ExpiresIn:    expiresIn,
 				Scope:        tScope,
 			}
@@ -710,16 +732,21 @@ func emptyHandler(w http.ResponseWriter, req *http.Request) {}
 func (r *oauthProxy) logoutHandler(writer http.ResponseWriter, req *http.Request) {
 	// @check if the redirection is there
 	var redirectURL string
-	for k := range req.URL.Query() {
-		if k == "redirect" {
-			redirectURL = req.URL.Query().Get("redirect")
 
-			if redirectURL == "" {
-				// then we can default to redirection url
-				redirectURL = strings.TrimSuffix(
-					r.config.RedirectionURL,
-					"/oauth/callback",
-				)
+	if r.config.PostLogoutRedirectURI != "" {
+		redirectURL = r.config.PostLogoutRedirectURI
+	} else {
+		for k := range req.URL.Query() {
+			if k == "redirect" {
+				redirectURL = req.URL.Query().Get("redirect")
+
+				if redirectURL == "" {
+					// then we can default to redirection url
+					redirectURL = strings.TrimSuffix(
+						r.config.RedirectionURL,
+						"/oauth/callback",
+					)
+				}
 			}
 		}
 	}
@@ -749,6 +776,15 @@ func (r *oauthProxy) logoutHandler(writer http.ResponseWriter, req *http.Request
 	if refresh, _, err := r.retrieveRefreshToken(req, user); err == nil {
 		identityToken = refresh
 	}
+
+	idToken, _, err := r.retrieveIDToken(req, user)
+
+	// we are doing it so that in case with no-redirects=true, we can pass
+	// id token in authorization header
+	if err != nil {
+		idToken = user.rawToken
+	}
+
 	r.clearAllCookies(req, writer)
 
 	// @metric increment the logout counter
@@ -768,12 +804,22 @@ func (r *oauthProxy) logoutHandler(writer http.ResponseWriter, req *http.Request
 
 	// @check if we should redirect to the provider
 	if r.config.EnableLogoutRedirect {
+		postLogoutParams := ""
+		if r.config.PostLogoutRedirectURI != "" {
+			postLogoutParams = fmt.Sprintf(
+				"?id_token_hint=%s&post_logout_redirect_uri=%s",
+				idToken,
+				url.QueryEscape(redirectURL),
+			)
+		}
+
 		sendTo := fmt.Sprintf(
-			"%s/protocol/openid-connect/logout",
+			"%s/protocol/openid-connect/logout%s",
 			strings.TrimSuffix(
 				r.config.DiscoveryURL,
 				"/.well-known/openid-configuration",
 			),
+			postLogoutParams,
 		)
 
 		r.redirectToURL(
@@ -806,12 +852,6 @@ func (r *oauthProxy) logoutHandler(writer http.ResponseWriter, req *http.Request
 					InsecureSkipVerify: r.config.SkipOpenIDProviderTLSVerify,
 				},
 			},
-		}
-
-		if err != nil {
-			scope.Logger.Error("unable to retrieve the openid client", zap.Error(err))
-			writer.WriteHeader(http.StatusInternalServerError)
-			return
 		}
 
 		// step: add the authentication headers
@@ -1007,6 +1047,26 @@ func (r *oauthProxy) retrieveRefreshToken(req *http.Request, user *userContext) 
 
 	encrypted := token // returns encrypted, avoids encoding twice
 	token, err = encryption.DecodeText(token, r.config.EncryptionKey)
+	return token, encrypted, err
+}
+
+// retrieveIDToken retrieves the id token from cookie
+func (r *oauthProxy) retrieveIDToken(req *http.Request, user *userContext) (string, string, error) {
+	var token string
+	var err error
+	var encrypted string
+
+	token, err = utils.GetTokenInCookie(req, r.config.CookieIDTokenName)
+
+	if err != nil {
+		return token, "", err
+	}
+
+	if r.config.EnableEncryptedToken {
+		encrypted = token
+		token, err = encryption.DecodeText(token, r.config.EncryptionKey)
+	}
+
 	return token, encrypted, err
 }
 
