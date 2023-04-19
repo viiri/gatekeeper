@@ -1,7 +1,7 @@
 //go:build e2e
 // +build e2e
 
-package main
+package e2e_test
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 
 	"github.com/cenkalti/backoff"
 	resty "github.com/go-resty/resty/v2"
+	"github.com/gogatekeeper/gatekeeper/pkg/proxy"
 	"github.com/gogatekeeper/gatekeeper/pkg/testsuite"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -83,7 +84,7 @@ func TestE2E(t *testing.T) {
 	os.Setenv("PROXY_SKIP_ACCESS_TOKEN_ISSUER_CHECK", "true")
 
 	go func() {
-		app := newOauthProxyApp()
+		app := proxy.NewOauthProxyApp()
 		os.Args = []string{os.Args[0]}
 		err := app.Run(os.Args)
 
