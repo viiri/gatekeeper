@@ -1661,6 +1661,77 @@ func TestCustomHeadersHandler(t *testing.T) {
 	}
 }
 
+func TestCustomHeadersHandlerNoProxyNoRedirects(t *testing.T) {
+	requests := []struct {
+		Match         []string
+		ProxySettings func(c *config.Config)
+		Request       fakeRequest
+	}{
+		{
+			Match: []string{"subject", "userid", "email", "username"},
+			ProxySettings: func(conf *config.Config) {
+				conf.EnableDefaultDeny = true
+				conf.NoRedirects = true
+				conf.NoProxy = true
+			},
+			Request: fakeRequest{
+				URI:      FakeAuthAllURL,
+				HasToken: true,
+				TokenClaims: map[string]interface{}{
+					"sub":                "test-subject",
+					"username":           "rohith",
+					"preferred_username": "rohith",
+					"email":              "gambol99@gmail.com",
+				},
+				ExpectedHeaders: map[string]string{
+					"X-Auth-Subject":  "test-subject",
+					"X-Auth-Userid":   "rohith",
+					"X-Auth-Email":    "gambol99@gmail.com",
+					"X-Auth-Username": "rohith",
+				},
+				ExpectedCode: http.StatusOK,
+				ExpectedContent: func(body string, testNum int) {
+					assert.Equal(t, "", body)
+				},
+			},
+		},
+		{
+			Match: []string{"given_name", "family_name", "preferred_username|Custom-Header"},
+			ProxySettings: func(conf *config.Config) {
+				conf.EnableDefaultDeny = true
+				conf.NoRedirects = true
+				conf.NoProxy = true
+			},
+			Request: fakeRequest{
+				URI:      FakeAuthAllURL,
+				HasToken: true,
+				TokenClaims: map[string]interface{}{
+					"email":              "gambol99@gmail.com",
+					"name":               "Rohith Jayawardene",
+					"family_name":        "Jayawardene",
+					"preferred_username": "rjayawardene",
+					"given_name":         "Rohith",
+				},
+				ExpectedHeaders: map[string]string{
+					"X-Auth-Given-Name":  "Rohith",
+					"X-Auth-Family-Name": "Jayawardene",
+					"Custom-Header":      "rjayawardene",
+				},
+				ExpectedCode: http.StatusOK,
+				ExpectedContent: func(body string, testNum int) {
+					assert.Equal(t, "", body)
+				},
+			},
+		},
+	}
+	for _, c := range requests {
+		cfg := newFakeKeycloakConfig()
+		cfg.AddClaims = c.Match
+		c.ProxySettings(cfg)
+		newFakeProxy(cfg, &fakeAuthConfig{}).RunTests(t, []fakeRequest{c.Request})
+	}
+}
+
 func TestAdmissionHandlerRoles(t *testing.T) {
 	cfg := newFakeKeycloakConfig()
 	cfg.NoRedirects = true
