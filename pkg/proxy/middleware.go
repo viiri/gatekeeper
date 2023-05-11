@@ -794,6 +794,8 @@ func (r *OauthProxy) responseHeaderMiddleware(headers map[string]string) func(ht
 }
 
 // identityHeadersMiddleware is responsible for adding the authentication headers to upstream
+//
+//nolint:cyclop
 func (r *OauthProxy) identityHeadersMiddleware(custom []string) func(http.Handler) http.Handler {
 	customClaims := make(map[string]string)
 
@@ -823,24 +825,31 @@ func (r *OauthProxy) identityHeadersMiddleware(custom []string) func(http.Handle
 				return
 			}
 
+			var headers http.Header
+			if r.Config.NoProxy {
+				headers = wrt.Header()
+			} else {
+				headers = req.Header
+			}
+
 			if scope.Identity != nil {
 				user := scope.Identity
-				req.Header.Set("X-Auth-Audience", strings.Join(user.Audiences, ","))
-				req.Header.Set("X-Auth-Email", user.Email)
-				req.Header.Set("X-Auth-ExpiresIn", user.ExpiresAt.String())
-				req.Header.Set("X-Auth-Groups", strings.Join(user.Groups, ","))
-				req.Header.Set("X-Auth-Roles", strings.Join(user.Roles, ","))
-				req.Header.Set("X-Auth-Subject", user.ID)
-				req.Header.Set("X-Auth-Userid", user.Name)
-				req.Header.Set("X-Auth-Username", user.Name)
+				headers.Set("X-Auth-Audience", strings.Join(user.Audiences, ","))
+				headers.Set("X-Auth-Email", user.Email)
+				headers.Set("X-Auth-ExpiresIn", user.ExpiresAt.String())
+				headers.Set("X-Auth-Groups", strings.Join(user.Groups, ","))
+				headers.Set("X-Auth-Roles", strings.Join(user.Roles, ","))
+				headers.Set("X-Auth-Subject", user.ID)
+				headers.Set("X-Auth-Userid", user.Name)
+				headers.Set("X-Auth-Username", user.Name)
 
 				// should we add the token header?
 				if r.Config.EnableTokenHeader {
-					req.Header.Set("X-Auth-Token", user.RawToken)
+					headers.Set("X-Auth-Token", user.RawToken)
 				}
 				// add the authorization header if requested
 				if r.Config.EnableAuthorizationHeader {
-					req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", user.RawToken))
+					headers.Set("Authorization", fmt.Sprintf("Bearer %s", user.RawToken))
 				}
 				// are we filtering out the cookies
 				if !r.Config.EnableAuthorizationCookies {
@@ -849,7 +858,7 @@ func (r *OauthProxy) identityHeadersMiddleware(custom []string) func(http.Handle
 				// inject any custom claims
 				for claim, header := range customClaims {
 					if claim, found := user.Claims[claim]; found {
-						req.Header.Set(header, fmt.Sprintf("%v", claim))
+						headers.Set(header, fmt.Sprintf("%v", claim))
 					}
 				}
 			}
