@@ -1050,9 +1050,16 @@ func (r *OauthProxy) NewOpenIDProvider() (*oidc3.Provider, *gocloak.GoCloak, err
 		restyClient.SetProxy(r.Config.OpenIDProviderProxy)
 	}
 
+	ctx := context.Background()
+
 	// see https://github.com/coreos/go-oidc/issues/214
 	// see https://github.com/coreos/go-oidc/pull/260
-	ctx := oidc3.ClientContext(context.Background(), restyClient.GetClient())
+	if r.Config.IssuerURL != "" {
+		ctx = oidc3.InsecureIssuerURLContext(ctx, r.Config.IssuerURL)
+	}
+
+	ctx = oidc3.ClientContext(ctx, restyClient.GetClient())
+
 	provider, err := oidc3.NewProvider(ctx, r.Config.DiscoveryURL)
 
 	if err != nil {

@@ -58,6 +58,8 @@ type Config struct {
 	ListenAdminScheme string `json:"listen-admin-scheme" yaml:"listen-admin-scheme" usage:"scheme to serve admin-only endpoint (http or https)." env:"LISTEN_ADMIN_SCHEME"`
 	// DiscoveryURL is the url for the keycloak server
 	DiscoveryURL string `json:"discovery-url" yaml:"discovery-url" usage:"discovery url to retrieve the openid configuration" env:"DISCOVERY_URL"`
+	// IssuerURL is the url for issuer validation
+	IssuerURL string `json:"issuer-url" yaml:"issuer-url" usage:"issuer url for issuer validation" env:"ISSUER_URL"`
 	// ClientID is the client id
 	ClientID string `json:"client-id" yaml:"client-id" usage:"client id used to authenticate to the oauth service" env:"CLIENT_ID"`
 	// ClientSecret is the secret for AS
@@ -746,6 +748,15 @@ func (r *Config) isDiscoveryURLValid() error {
 	if r.DiscoveryURL == "" {
 		return errors.New("you have not specified the discovery url")
 	}
+
+	if r.IssuerURL != "" {
+		_, err := url.ParseRequestURI(r.IssuerURL)
+
+		if err != nil {
+			return errors.New("invalid issuer url")
+		}
+	}
+
 	return nil
 }
 
